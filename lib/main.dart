@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
 import 'screens/navigation_shell.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize and schedule offline daily check-in reminders (e.g., at 8:00 PM)
+  final notifications = NotificationService();
+  await notifications.initialize();
+  await notifications.requestPermissions();
+  await notifications.scheduleDailyReminder(hour: 20, minute: 0);
+
   runApp(const BotanicalCompanionApp());
 }
 

@@ -7,6 +7,7 @@ class Thought {
   final List<String> userTags;
   String? linkedThoughtId;
   String? connectionReason;
+  List<double>? embedding; // Precompiled 384D mathematical vector profile
 
   Thought({
     required this.id,
@@ -17,6 +18,7 @@ class Thought {
     this.userTags = const [],
     this.linkedThoughtId,
     this.connectionReason,
+    this.embedding,
   });
 
   Map<String, dynamic> toJson() => {
@@ -28,6 +30,7 @@ class Thought {
     'userTags': userTags,
     'linkedThoughtId': linkedThoughtId,
     'connectionReason': connectionReason,
+    'embedding': embedding,
   };
 
   factory Thought.fromJson(Map<String, dynamic> json) => Thought(
@@ -39,5 +42,6 @@ class Thought {
     userTags: List<String>.from(json['userTags'] ?? []),
     linkedThoughtId: json['linkedThoughtId'],
     connectionReason: json['connectionReason'],
+    embedding: json['embedding'] != null ? List<double>.from(json['embedding'].map((x) => x.toDouble())) : null,
   );
 }

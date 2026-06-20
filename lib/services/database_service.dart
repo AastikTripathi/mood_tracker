@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/thought.dart';
 import '../models/physical_log.dart';
@@ -21,37 +22,78 @@ class DatabaseService {
 
   bool _isInitialized = false;
 
+  Future<File> _getSaveFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/garden_save.json');
+  }
+
+  /// Boots storage system and initializes on-device neural networking assets
   Future<void> init() async {
     if (_isInitialized) return;
-    final prefs = await SharedPreferences.getInstance();
+    
+    // Initialize NLP service using the TFLite engine
+    await _nlp.initialize();
 
-    final thoughtsRaw = prefs.getStringList('thoughts') ?? [];
-    _thoughts = thoughtsRaw
-        .map((t) => Thought.fromJson(jsonDecode(t)))
-        .toList();
+    final file = await _getSaveFile();
 
-    final physicalRaw = prefs.getStringList('physical_logs') ?? [];
-    _physicalLogs = physicalRaw
-        .map((p) => PhysicalLog.fromJson(jsonDecode(p)))
-        .toList();
+    if (await file.exists()) {
+      try {
+        final content = await file.readAsString();
+        final Map<String, dynamic> data = jsonDecode(content);
 
-    final habitDefsRaw = prefs.getStringList('habit_definitions') ?? [];
-    _habitDefinitions = habitDefsRaw
-        .map((h) => HabitDefinition.fromJson(jsonDecode(h)))
-        .toList();
+        final List<dynamic> thoughtsJson = data['thoughts'] ?? [];
+        _thoughts = thoughtsJson.map((t) => Thought.fromJson(t)).toList();
 
-    final habitLogsRaw = prefs.getStringList('habit_logs') ?? [];
-    _habitLogs = habitLogsRaw
-        .map((hl) => HabitLog.fromJson(jsonDecode(hl)))
-        .toList();
+        final List<dynamic> physicalJson = data['physical_logs'] ?? [];
+        _physicalLogs = physicalJson.map((p) => PhysicalLog.fromJson(p)).toList();
 
-    if (_habitDefinitions.isEmpty) {
-      await saveHabitDefinition(HabitDefinition(id: '1', name: 'Stepped Outside ☀️', iconEmoji: '☀️'));
-      await saveHabitDefinition(HabitDefinition(id: '2', name: 'Rested Well 🛌', iconEmoji: '🛌'));
-      await saveHabitDefinition(HabitDefinition(id: '3', name: 'Drank Water 💧', iconEmoji: '💧'));
-      await saveHabitDefinition(HabitDefinition(id: '4', name: 'Stretched / Walked 🌿', iconEmoji: '🌿'));
-      await saveHabitDefinition(HabitDefinition(id: '5', name: 'Read a Book 📖', iconEmoji: '📖'));
+        final List<dynamic> habitDefsJson = data['habit_definitions'] ?? [];
+        _habitDefinitions = habitDefsJson.map((h) => HabitDefinition.fromJson(h)).toList();
+
+        final List<dynamic> habitLogsJson = data['habit_logs'] ?? [];
+        _habitLogs = habitLogsJson.map((hl) => HabitLog.fromJson(hl)).toList();
+      } catch (e) {
+        print("Error reading garden save file: $e");
+      }
+    } else {
+      // Legacy SharedPreferences Migration
+      final prefs = await SharedPreferences.getInstance();
+      final thoughtsRaw = prefs.getStringList('thoughts') ?? [];
+      final physicalRaw = prefs.getStringList('physical_logs') ?? [];
+      final habitDefsRaw = prefs.getStringList('habit_definitions') ?? [];
+      final habitLogsRaw = prefs.getStringList('habit_logs') ?? [];
+
+      if (thoughtsRaw.isNotEmpty || physicalRaw.isNotEmpty || habitDefsRaw.isNotEmpty || habitLogsRaw.isNotEmpty) {
+        _thoughts = thoughtsRaw.map((t) => Thought.fromJson(jsonDecode(t))).toList();
+        _physicalLogs = physicalRaw.map((p) => PhysicalLog.fromJson(jsonDecode(p))).toList();
+        _habitDefinitions = habitDefsRaw.map((h) => HabitDefinition.fromJson(jsonDecode(h))).toList();
+        _habitLogs = habitLogsRaw.map((hl) => HabitLog.fromJson(jsonDecode(hl))).toList();
+        
+        // Save to the new JSON save file immediately
+        await _saveAllData();
+      }
     }
+
+    // Prune legacy default habits
+    final oldIds = ['1', '2', '3', '4', '5', 'pain_flare', 'fog', 'nausea'];
+    _habitDefinitions.removeWhere((h) => oldIds.contains(h.id));
+
+    final defaults = [
+      HabitDefinition(id: 'eating', name: 'Eating 🍽️', iconEmoji: '🍽️'),
+      HabitDefinition(id: 'napping', name: 'Napping 💤', iconEmoji: '💤'),
+      HabitDefinition(id: 'studying', name: 'Studying 📚', iconEmoji: '📚'),
+      HabitDefinition(id: 'gardening', name: 'Gardening 🪴', iconEmoji: '🪴'),
+      HabitDefinition(id: 'stepping_out', name: 'Stepping Out ☀️', iconEmoji: '☀️'),
+      HabitDefinition(id: 'exercise', name: 'Exercise 🏃', iconEmoji: '🏃'),
+      HabitDefinition(id: 'seizure', name: 'Seizure Incident ⚡', iconEmoji: '⚡'),
+    ];
+
+    for (var def in defaults) {
+      if (!_habitDefinitions.any((h) => h.id == def.id)) {
+        _habitDefinitions.add(def);
+      }
+    }
+    await _saveAllData();
 
     _isInitialized = true;
   }
@@ -61,14 +103,24 @@ class DatabaseService {
   List<HabitDefinition> getHabitDefinitions() => _habitDefinitions;
   List<HabitLog> getHabitLogs() => _habitLogs;
 
+  /// Processes a new journal input, builds its vector footprint, and saves to disk
   Future<void> saveThought(Thought thought) async {
+    // Generate the 384D mathematical vector profile exactly once and save it in the object
     final currentVector = _nlp.vectorize(thought.textContent);
+    thought.embedding = currentVector;
+
     Thought? bestMatch;
     double highestSimilarity = 0.0;
 
     for (var pastThought in _thoughts) {
       if (pastThought.id == thought.id) continue;
-      final pastVector = _nlp.vectorize(pastThought.textContent);
+      
+      // Lazily calculate and cache vector if missing (e.g. legacy migrated thoughts)
+      final pastVector = pastThought.embedding ?? _nlp.vectorize(pastThought.textContent);
+      if (pastThought.embedding == null) {
+        pastThought.embedding = pastVector;
+      }
+
       final similarity = _nlp.calculateSimilarity(currentVector, pastVector);
 
       if (similarity > highestSimilarity) {
@@ -79,26 +131,87 @@ class DatabaseService {
 
     if (highestSimilarity >= 0.5 && bestMatch != null) {
       thought.linkedThoughtId = bestMatch.id;
-      thought.connectionReason = "You felt very similarly on ${_formatDate(bestMatch.timestamp)}. Take a breath; you got through that storm.";
+      final curMood = thought.moodScore;
+      final pastMood = bestMatch.moodScore;
+      
+      if (curMood <= 4 && pastMood <= 4) {
+        thought.connectionReason = "You experienced a similar quiet headspace on ${_formatDate(bestMatch.timestamp)}. You made your way through it then.";
+      } else if (curMood >= 7 && pastMood >= 7) {
+        thought.connectionReason = "This connects with the bright energy you felt on ${_formatDate(bestMatch.timestamp)}.";
+      } else if (curMood <= 4 && pastMood >= 7) {
+        thought.connectionReason = "A reminder of the bright moment you captured on ${_formatDate(bestMatch.timestamp)}: \"${bestMatch.textContent}\"";
+      } else {
+        thought.connectionReason = "Semantically connected to your reflection from ${_formatDate(bestMatch.timestamp)}.";
+      }
     }
 
     _thoughts.add(thought);
-    await _syncThoughts();
+    await _saveAllData();
+  }
+
+  /// Instantly scans history using precompiled vector math without reprocessing text
+  List<Thought> semanticSearch(String query, {double targetThreshold = 0.35}) {
+    // Convert current query text string into a baseline matching vector
+    final queryVector = _nlp.vectorize(query);
+    
+    final List<MapEntry<Thought, double>> scoredEntries = [];
+
+    for (final thought in _thoughts) {
+      final pastVector = thought.embedding ?? _nlp.vectorize(thought.textContent);
+      if (thought.embedding == null) {
+        thought.embedding = pastVector;
+      }
+      final similarity = _nlp.calculateSimilarity(queryVector, pastVector);
+      if (similarity >= targetThreshold) {
+        scoredEntries.add(MapEntry(thought, similarity));
+      }
+    }
+
+    // Sort descending by highest proximity score
+    scoredEntries.sort((a, b) => b.value.compareTo(a.value));
+    return scoredEntries.map((e) => e.key).toList();
+  }
+
+  /// Groups historical thought data dynamically into organic mood spaces
+  List<List<Thought>> clusterHistory({double clusterThreshold = 0.55}) {
+    final List<List<Thought>> clusters = [];
+
+    for (final doc in _thoughts) {
+      bool assigned = false;
+      final docVector = doc.embedding ?? _nlp.vectorize(doc.textContent);
+      if (doc.embedding == null) {
+        doc.embedding = docVector;
+      }
+
+      for (final currentCluster in clusters) {
+        final firstVector = currentCluster.first.embedding ?? _nlp.vectorize(currentCluster.first.textContent);
+        if (currentCluster.first.embedding == null) {
+          currentCluster.first.embedding = firstVector;
+        }
+        double similarity = _nlp.calculateSimilarity(docVector, firstVector);
+        if (similarity >= clusterThreshold) {
+          currentCluster.add(doc);
+          assigned = true;
+          break;
+        }
+      }
+
+      if (!assigned) {
+        clusters.add([doc]);
+      }
+    }
+    return clusters;
   }
 
   Future<void> savePhysicalLog(PhysicalLog log) async {
     _physicalLogs.removeWhere((p) => p.date.year == log.date.year && p.date.month == log.date.month && p.date.day == log.date.day);
     _physicalLogs.add(log);
-    final prefs = await SharedPreferences.getInstance();
-    final data = _physicalLogs.map((p) => jsonEncode(p.toJson())).toList();
-    await prefs.setStringList('physical_logs', data);
+    await _saveAllData();
   }
 
   Future<void> saveHabitDefinition(HabitDefinition def) async {
     _habitDefinitions.add(def);
-    final prefs = await SharedPreferences.getInstance();
-    final data = _habitDefinitions.map((h) => jsonEncode(h.toJson())).toList();
-    await prefs.setStringList('habit_definitions', data);
+    await _saveAllData();
   }
 
   Future<void> saveHabitLog(HabitLog log) async {
@@ -110,9 +223,53 @@ class DatabaseService {
     }
 
     _habitLogs.add(log);
-    final prefs = await SharedPreferences.getInstance();
-    final data = _habitLogs.map((hl) => jsonEncode(hl.toJson())).toList();
-    await prefs.setStringList('habit_logs', data);
+    await _saveAllData();
+  }
+
+  Future<void> updateHabitLogTime(String logId, DateTime newTime) async {
+    final idx = _habitLogs.indexWhere((l) => l.id == logId);
+    if (idx != -1) {
+      final oldLog = _habitLogs[idx];
+      _habitLogs[idx] = HabitLog(
+        id: oldLog.id,
+        habitId: oldLog.habitId,
+        occurrenceDate: newTime,
+        createdAt: oldLog.createdAt,
+      );
+      await _saveAllData();
+    }
+  }
+
+  Future<void> deleteHabitLog(String logId) async {
+    _habitLogs.removeWhere((l) => l.id == logId);
+    await _saveAllData();
+  }
+
+  Future<void> removeHabitLogToday(String habitId) async {
+    final today = DateTime.now();
+    _habitLogs.removeWhere((log) =>
+        log.habitId == habitId &&
+        log.occurrenceDate.year == today.year &&
+        log.occurrenceDate.month == today.month &&
+        log.occurrenceDate.day == today.day);
+    await _saveAllData();
+  }
+
+  Future<void> deleteHabitDefinition(String habitId) async {
+    _habitDefinitions.removeWhere((h) => h.id == habitId || h.name == habitId);
+    _habitLogs.removeWhere((log) => log.habitId == habitId);
+    await _saveAllData();
+  }
+
+  Future<void> _saveAllData() async {
+    final file = await _getSaveFile();
+    final Map<String, dynamic> data = {
+      'thoughts': _thoughts.map((t) => t.toJson()).toList(),
+      'physical_logs': _physicalLogs.map((p) => p.toJson()).toList(),
+      'habit_definitions': _habitDefinitions.map((h) => h.toJson()).toList(),
+      'habit_logs': _habitLogs.map((hl) => hl.toJson()).toList(),
+    };
+    await file.writeAsString(jsonEncode(data));
   }
 
   Map<String, String> calculateLocalCausalCorrelations() {
@@ -175,6 +332,8 @@ class DatabaseService {
     return {
       'status': status,
       'insight': insight,
+      'sleepCorrelation': sleepCorrelation.toStringAsFixed(2),
+      'cycleCorrelation': cycleCorrelation.toStringAsFixed(2),
     };
   }
 
@@ -197,12 +356,6 @@ class DatabaseService {
 
     if (denX == 0 || denY == 0) return 0.0;
     return num / math.sqrt(denX * denY);
-  }
-
-  Future<void> _syncThoughts() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = _thoughts.map((t) => jsonEncode(t.toJson())).toList();
-    await prefs.setStringList('thoughts', data);
   }
 
   String _formatDate(DateTime date) {

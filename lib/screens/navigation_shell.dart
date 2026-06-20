@@ -7,10 +7,10 @@ class NavigationShell extends StatefulWidget {
   const NavigationShell({super.key});
 
   @override
-  State<NavigationShell> createState() => _NavigationShellState();
+  State<NavigationShell> createState() => NavigationShellState();
 }
 
-class _NavigationShellState extends State<NavigationShell> {
+class NavigationShellState extends State<NavigationShell> {
   int _currentIndex = 0;
 
   final GlobalKey<GardenHomeScreenState> _gardenKey = GlobalKey<GardenHomeScreenState>();
@@ -37,6 +37,10 @@ class _NavigationShellState extends State<NavigationShell> {
     } else if (index == 1) {
       _historyKey.currentState?.refreshData();
     }
+  }
+
+  void selectTab(int index) {
+    _onTabTapped(index);
   }
 
   @override
@@ -95,6 +99,7 @@ class _NavigationShellState extends State<NavigationShell> {
           if (updated == true) {
             _gardenKey.currentState?.refreshState();
             _historyKey.currentState?.refreshData();
+            _onTabTapped(1);
           }
         },
         child: const Icon(Icons.add_rounded, size: 32),

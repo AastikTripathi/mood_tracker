@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import '../models/thought.dart';
 import '../models/habit.dart';
 import '../models/physical_log.dart';
+import '../screens/detailed_analytics_screen.dart';
 
 class CausalCorrelationCard extends StatelessWidget {
   final List<Thought> historyThoughts;
   final List<HabitDefinition> availableHabits;
   final List<HabitLog> allHabitLogs;
   final List<PhysicalLog> physicalLogs;
+  final bool isTwilight;
 
   const CausalCorrelationCard({
     super.key,
@@ -15,12 +17,13 @@ class CausalCorrelationCard extends StatelessWidget {
     required this.availableHabits,
     required this.allHabitLogs,
     required this.physicalLogs,
+    required this.isTwilight,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? Colors.white.withOpacity(0.02) : Colors.white;
+    final bool isCardDark = isTwilight;
+    final cardBg = isCardDark ? const Color(0xFF1E293B) : Colors.white;
 
     final brightDays = historyThoughts.where((t) => t.moodScore >= 7).toList();
     final heavyDays = historyThoughts.where((t) => t.moodScore <= 4).toList();
@@ -80,53 +83,80 @@ class CausalCorrelationCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.teal.withOpacity(0.1)),
+        border: Border.all(color: Colors.teal.withOpacity(0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.auto_awesome, size: 18, color: Colors.teal),
-              SizedBox(width: 8),
+              const Icon(Icons.auto_awesome, size: 18, color: Colors.teal),
+              const SizedBox(width: 8),
               Text(
                 "Patterns of the Heart",
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: -0.3),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.3,
+                  color: isCardDark ? Colors.white : Colors.black87,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             "Gentle connections your sanctuary notices across your thoughts and routines.",
-            style: TextStyle(fontSize: 11, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 11,
+              color: isCardDark ? Colors.white38 : Colors.grey,
+            ),
           ),
           const SizedBox(height: 18),
 
           if (historyThoughts.length < 3)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Text(
-                "Tending to the garden... Your personal connections will reveal themselves here as you write and save entries.",
-                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
-                textAlign: TextAlign.center,
+            Text(
+              "Tending to the garden... Your personal connections will reveal themselves here as you write and save entries.",
+              style: TextStyle(
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+                color: isCardDark ? Colors.white38 : Colors.grey,
               ),
+              textAlign: TextAlign.center,
             )
           else ...[
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.teal.withOpacity(0.04),
+                color: isCardDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: Colors.teal.withOpacity(0.08)),
               ),
               child: Text(
                 _compileHumanInsight(sleepBright, sleepHeavy, periodHeavyCount, dominantHeavyTheme),
-                style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white70 : Colors.black87, height: 1.5),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isCardDark ? Colors.white70 : Colors.black87,
+                  height: 1.5,
+                ),
               ),
             ),
             const SizedBox(height: 20),
 
-            const Text("What builds your brighter days:", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(
+              "What builds your brighter days:",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: isCardDark ? Colors.white38 : Colors.grey,
+              ),
+            ),
             const SizedBox(height: 10),
 
             _buildInsightRow(
@@ -134,7 +164,7 @@ class CausalCorrelationCard extends StatelessWidget {
               detail: "${sleepBright.toStringAsFixed(1)}h avg",
               progress: (sleepBright / 10.0).clamp(0.1, 1.0),
               color: const Color(0xFF10B981),
-              isDark: isDark,
+              isCardDark: isCardDark,
             ),
 
             ...availableHabits.take(2).map((habit) {
@@ -151,20 +181,27 @@ class CausalCorrelationCard extends StatelessWidget {
                 detail: "${(density * 100).toStringAsFixed(0)}% of days",
                 progress: density.clamp(0.05, 1.0),
                 color: const Color(0xFF10B981),
-                isDark: isDark,
+                isCardDark: isCardDark,
               );
             }),
 
             const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider(height: 1)),
-            const Text("What commonly tracks with heavier days:", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(
+              "What commonly tracks with heavier days:",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: isCardDark ? Colors.white38 : Colors.grey,
+              ),
+            ),
             const SizedBox(height: 10),
 
             _buildInsightRow(
               label: "Thoughts centering on '$dominantHeavyTheme'",
               detail: "$maxHeavyCount entries",
               progress: heavyDays.isNotEmpty ? (maxHeavyCount / heavyDays.length).clamp(0.1, 1.0) : 0.1,
-              color: Colors.redAccent.shade100,
-              isDark: isDark,
+              color: Colors.redAccent.shade200,
+              isCardDark: isCardDark,
             ),
 
             if (periodHeavyCount > 0)
@@ -173,8 +210,35 @@ class CausalCorrelationCard extends StatelessWidget {
                 detail: "$periodHeavyCount days noticed",
                 progress: heavyDays.isNotEmpty ? (periodHeavyCount / heavyDays.length).clamp(0.1, 1.0) : 0.1,
                 color: Colors.pinkAccent.withOpacity(0.7),
-                isDark: isDark,
+                isCardDark: isCardDark,
               ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DetailedAnalyticsScreen(
+                      historyThoughts: historyThoughts,
+                      availableHabits: availableHabits,
+                      allHabitLogs: allHabitLogs,
+                      physicalLogs: physicalLogs,
+                      isTwilight: isTwilight,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.arrow_forward, size: 14, color: Colors.teal),
+              label: const Text(
+                "Go Deeper",
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: Colors.teal.withOpacity(0.3)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
           ]
         ],
       ),
@@ -196,7 +260,7 @@ class CausalCorrelationCard extends StatelessWidget {
     required String detail,
     required double progress,
     required Color color,
-    required bool isDark,
+    required bool isCardDark,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -206,7 +270,14 @@ class CausalCorrelationCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: isCardDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
               Text(detail, style: const TextStyle(fontSize: 10.5, color: Colors.grey, fontWeight: FontWeight.bold)),
             ],
           ),
@@ -216,7 +287,7 @@ class CausalCorrelationCard extends StatelessWidget {
               Container(
                 height: 6,
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.white10 : Colors.black.withOpacity(0.04),
+                  color: isCardDark ? Colors.white10 : Colors.black.withOpacity(0.04),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),

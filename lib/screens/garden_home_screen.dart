@@ -10,9 +10,10 @@ import '../painters/plant_painter.dart';
 import '../services/database_service.dart';
 import '../widgets/habit_tracker_card.dart';
 import '../widgets/cozy_almanac_card.dart';
-import '../widgets/causal_correlation_card.dart';
+import 'detailed_analytics_screen.dart';
 import 'journal_entry_screen.dart';
 import 'journal_history_screen.dart';
+import 'navigation_shell.dart';
 
 class PlantType {
   final String id;
@@ -63,8 +64,6 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
   Thought? _selectedAlmanacThought;
   List<String> _selectedAlmanacHabits = [];
 
-  Map<String, String> _localInsights = {'status': 'Cultivating sanctuary analytics...'};
-
   late AnimationController _animController;
   late AnimationController _wiggleController;
   double _swayOffset = 0.0;
@@ -73,6 +72,17 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
 
   String _selectedPlantId = 'default';
   int _consistencyDays = 0;
+  bool _isTwilightInitialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_isTwilightInitialized) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      _isTwilight = isDark;
+      _isTwilightInitialized = true;
+    }
+  }
 
   @override
   void initState() {
@@ -125,7 +135,6 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
 
   void _syncStateFromDatabase() {
     final list = _db.getThoughts();
-    final insights = _db.calculateLocalCausalCorrelations();
     final habitDefs = _db.getHabitDefinitions();
     final allLogs = _db.getHabitLogs();
 
@@ -141,7 +150,6 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
 
     setState(() {
       _historyThoughts = list;
-      _localInsights = insights;
       _availableHabits = habitDefs;
       _allHabitLogs = allLogs;
       _completedHabits = todayCompleted;
@@ -225,6 +233,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
       );
       return def != null ? "${def.iconEmoji} ${def.name}" : "🌿 ${log.habitId}";
     })
+        .toSet()
         .toList();
 
     setState(() {
@@ -236,7 +245,10 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
   void _showAddHabitDialog() {
     final nameController = TextEditingController();
     String selectedEmoji = '🌿';
-    final emojis = ['🌿', '☀️', '💧', '🛌', '📖', '🏃‍♀️', '🧘‍♀️', '🍵', '🍎', '🎨', '🐶', '🎶'];
+    final emojis = [
+      '🌿', '☀️', '💧', '🛌', '📖', '🏃‍♀️', '🧘‍♀️', '🍵', '🍎', '🎨', '🐶', '🎶',
+      '⚡', '💥', '🤢', '💊'
+    ];
 
     showDialog(
       context: context,
@@ -456,7 +468,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
             top: 0,
             left: 0,
             right: 0,
-            bottom: MediaQuery.of(context).size.height * 0.45,
+            bottom: MediaQuery.of(context).size.height * 0.38,
             child: SafeArea(
               child: Stack(
                 alignment: Alignment.center,
@@ -486,7 +498,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       _wiggleController.forward(from: 0.0);
                     },
                     child: CustomPaint(
-                      size: const Size(300, 320),
+                      size: const Size(240, 260),
                       painter: PlantPainter(
                         growthProgress: growthProgress,
                         bloomProgress: bloomProgress,
@@ -506,7 +518,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
-              height: MediaQuery.of(context).size.height * 0.52,
+              height: MediaQuery.of(context).size.height * 0.44,
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               decoration: BoxDecoration(
                 color: _getDashboardCardColor(),
@@ -549,6 +561,9 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         );
                         if (updated == true) {
                           _syncStateFromDatabase();
+                          if (context.mounted) {
+                            context.findAncestorStateOfType<NavigationShellState>()?.selectTab(1);
+                          }
                         }
                       },
 
@@ -563,34 +578,41 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                     const SizedBox(height: 16),
 
                     if (_moodValue <= 4 && _latestLinkedReason.isNotEmpty) _buildCopingReminderAnchor(),
-
-                    const SizedBox(height: 16),
-
-                    _buildLocalInsightContainer(),
-
                     const SizedBox(height: 20),
 
                     HabitTrackerCard(
-                      availableHabits: _availableHabits,
-                      completedHabits: _completedHabits,
+                      availableHabits: _availableHabits.where((h) => h.id != 'seizure').toList(),
+                      allHabitLogs: _allHabitLogs,
                       isTwilight: _isTwilight,
                       onAddHabitRequested: _showAddHabitDialog,
-                      onHabitToggled: (habit, isSelected) async {
-                        setState(() {
-                          if (isSelected) {
-                            _completedHabits.remove(habit.id);
-                            _completedHabits.remove(habit.name);
-                          } else {
-                            _completedHabits.add(habit.id);
-                          }
-                        });
-
+                      onHabitLogged: (habit) async {
                         await _db.saveHabitLog(HabitLog(
                           id: DateTime.now().millisecondsSinceEpoch.toString(),
                           habitId: habit.id,
                           occurrenceDate: DateTime.now(),
                           createdAt: DateTime.now(),
                         ));
+                        _syncStateFromDatabase();
+                      },
+                      onHabitLogTimeUpdated: (logId, newTime) async {
+                        await _db.updateHabitLogTime(logId, newTime);
+                        _syncStateFromDatabase();
+                      },
+                      onHabitLogDeleted: (logId) async {
+                        await _db.deleteHabitLog(logId);
+                        _syncStateFromDatabase();
+                      },
+                      onHabitLoggedAtTime: (habit, time) async {
+                        await _db.saveHabitLog(HabitLog(
+                          id: DateTime.now().millisecondsSinceEpoch.toString(),
+                          habitId: habit.id,
+                          occurrenceDate: time,
+                          createdAt: DateTime.now(),
+                        ));
+                        _syncStateFromDatabase();
+                      },
+                      onHabitDeletedPermanently: (habit) async {
+                        await _db.deleteHabitDefinition(habit.id);
                         _syncStateFromDatabase();
                       },
                     ),
@@ -605,15 +627,61 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       selectedThought: _selectedAlmanacThought,
                       selectedHabits: _selectedAlmanacHabits,
                       onDateSelected: _loadAlmanacDetailsForDate,
+                      isTwilight: _isTwilight,
                     ),
 
                     const SizedBox(height: 24),
 
-                    CausalCorrelationCard(
-                      historyThoughts: _historyThoughts,
-                      availableHabits: _availableHabits,
-                      allHabitLogs: _allHabitLogs,
-                      physicalLogs: _db.getPhysicalLogs(),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DetailedAnalyticsScreen(
+                              historyThoughts: _historyThoughts,
+                              availableHabits: _availableHabits,
+                              allHabitLogs: _allHabitLogs,
+                              physicalLogs: _db.getPhysicalLogs(),
+                              isTwilight: _isTwilight,
+                            ),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: _getDashboardCardColor(),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: Colors.teal.withOpacity(0.12)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.analytics_outlined, color: Colors.teal, size: 24),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Deep Analytics & Patterns",
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isTwilight ? Colors.white : Colors.black87,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const Text(
+                                    "Analyze routine consistency & physical tracking trends.",
+                                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.teal),
+                          ],
+                        ),
+                      ),
                     ),
 
                     const SizedBox(height: 20),
@@ -624,34 +692,6 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLocalInsightContainer() {
-    final hasInsight = _localInsights.containsKey('insight');
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.teal.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.teal.withOpacity(0.12)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _localInsights['status'] ?? 'Cultivating...',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal),
-          ),
-          if (hasInsight) ...[
-            const SizedBox(height: 6),
-            Text(
-              _localInsights['insight']!,
-              style: TextStyle(fontSize: 12, color: _isTwilight ? Colors.white70 : Colors.black87, height: 1.4),
-            ),
-          ]
         ],
       ),
     );
@@ -739,6 +779,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
     );
   }
 
+
   Widget _buildSimulatorControls() {
     return Container(
       margin: const EdgeInsets.only(top: 10),
@@ -779,48 +820,149 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                 child: OutlinedButton.icon(
                   onPressed: () async {
                     final now = DateTime.now();
-                    for (int i = 1; i <= 14; i++) {
+                    for (int i = 1; i <= 45; i++) {
                       final day = now.subtract(Duration(days: i));
-                      final completedSteppedOutside = i % 2 == 0;
-                      final sleepHours = i % 3 == 0 ? 4.5 : 8.5;
-                      final mood = i % 3 == 0 ? 3 : (completedSteppedOutside ? 9 : 6);
-
+                      
+                      // 1. Determine period cycle properties (approx 28 day cycle, days 1-5 active)
+                      final cycleDay = i % 28;
+                      final isPeriod = cycleDay >= 1 && cycleDay <= 5;
+                      String flow = 'None';
+                      List<String> symptoms = [];
+                      if (isPeriod) {
+                        flow = (cycleDay == 1 || cycleDay == 5) ? 'Light' : ((cycleDay == 3) ? 'Heavy' : 'Medium');
+                        symptoms = ['Cramps', 'Fatigue'];
+                        if (cycleDay == 3) symptoms.add('Headache');
+                      }
+                      
+                      // 2. Correlate mood, pain, and sleep
+                      double pain = 0.0;
+                      double sleepHours = 7.5;
+                      int mood = 7;
+                      
+                      if (isPeriod) {
+                        pain = cycleDay == 3 ? 6.5 : 4.0;
+                        sleepHours = 6.0;
+                        mood = cycleDay == 3 ? 3 : 5;
+                      } else {
+                        // Some other pain flare-up days
+                        if (i % 12 == 0) {
+                          pain = 5.5;
+                          sleepHours = 5.0;
+                          mood = 4;
+                        } else {
+                          pain = (i % 7 == 0) ? 2.0 : 0.0;
+                          sleepHours = (i % 5 == 0) ? 8.5 : 7.5;
+                          mood = (i % 7 == 0) ? 6 : ((i % 10 == 0) ? 9 : 8);
+                        }
+                      }
+                      
+                      // 3. Seizures: simulate on low sleep & high pain days, or every 15 days
+                      List<String> seizures = [];
+                      if ((sleepHours < 6.5 && pain > 5.0) || (i % 15 == 0)) {
+                        seizures = ["10:30 AM"];
+                        if (i % 15 == 0) seizures.add("04:15 PM");
+                      }
+                      
+                      // 4. Save Physical Log
                       await _db.savePhysicalLog(PhysicalLog(
                         date: day,
                         sleepHours: sleepHours,
-                        isPeriodDay: false,
+                        isPeriodDay: isPeriod,
                         skippedMeal: i % 4 == 0,
                         lateCaffeine: i % 3 == 0,
+                        customPainLevel: pain > 0 ? pain : null,
+                        customSeizuresCount: seizures.length,
+                        seizureTimes: seizures,
+                        flowLevel: flow,
+                        cycleSymptoms: symptoms,
                       ));
-
+                      
+                      // 5. Save Thoughts
+                      String text;
+                      List<String> categories;
+                      if (mood <= 4) {
+                        text = "Felt really low and drained today. Pain levels were tough to manage, just rested.";
+                        categories = ['Tired', 'Vent'];
+                      } else if (mood >= 8) {
+                        text = "A lovely day! Took a walk outside in the sunshine and spent time in the garden.";
+                        categories = ['Nature', 'Cozy', 'Grateful'];
+                      } else {
+                        text = "Felt decent. Got some reading done and had a quiet, grounded afternoon.";
+                        categories = ['Grounded', 'Reflection'];
+                      }
+                      
                       await _db.saveThought(Thought(
                         id: 'mock_day_$i',
                         timestamp: day,
                         moodScore: mood,
-                        textContent: i % 3 == 0
-                            ? "Felt so tired and stagnant today. Stayed indoors."
-                            : "Went on an incredibly serene walk. Sun was shining bright!",
-                        categories: i % 3 == 0 ? ['Energy'] : ['Nature'],
+                        textContent: text,
+                        categories: categories,
+                        userTags: [categories.first],
                       ));
-
-                      if (completedSteppedOutside) {
+                      
+                      // 6. Save Habit Logs
+                      // Seizures
+                      for (final timeStr in seizures) {
+                        final dt = DateTime(day.year, day.month, day.day, 10, 30);
                         await _db.saveHabitLog(HabitLog(
-                          id: 'mock_hl_outside_$i',
-                          habitId: '1',
-                          occurrenceDate: day,
+                          id: 'mock_hl_seizure_${i}_${timeStr.replaceAll(':', '_')}',
+                          habitId: 'seizure',
+                          occurrenceDate: dt,
+                          createdAt: dt,
+                        ));
+                      }
+                      
+                      // Eating
+                      if (i % 4 != 0) {
+                        await _db.saveHabitLog(HabitLog(
+                          id: 'mock_hl_eating_$i',
+                          habitId: 'eating',
+                          occurrenceDate: day.add(const Duration(hours: 12)),
                           createdAt: day,
                         ));
                       }
-                      if (sleepHours > 7) {
+                      
+                      // Napping
+                      if (sleepHours < 7.0) {
                         await _db.saveHabitLog(HabitLog(
-                          id: 'mock_hl_sleep_$i',
-                          habitId: '2',
-                          occurrenceDate: day,
+                          id: 'mock_hl_napping_$i',
+                          habitId: 'napping',
+                          occurrenceDate: day.add(const Duration(hours: 15)),
+                          createdAt: day,
+                        ));
+                      }
+                      
+                      // Gardening
+                      if (mood >= 8 && i % 2 == 0) {
+                        await _db.saveHabitLog(HabitLog(
+                          id: 'mock_hl_gardening_$i',
+                          habitId: 'gardening',
+                          occurrenceDate: day.add(const Duration(hours: 10)),
+                          createdAt: day,
+                        ));
+                      }
+                      
+                      // Stepping Out
+                      if (mood >= 6 && i % 3 != 0) {
+                        await _db.saveHabitLog(HabitLog(
+                          id: 'mock_hl_stepping_$i',
+                          habitId: 'stepping_out',
+                          occurrenceDate: day.add(const Duration(hours: 11)),
+                          createdAt: day,
+                        ));
+                      }
+                      
+                      // Exercise
+                      if (mood >= 8 && i % 3 == 0) {
+                        await _db.saveHabitLog(HabitLog(
+                          id: 'mock_hl_exercise_$i',
+                          habitId: 'exercise',
+                          occurrenceDate: day.add(const Duration(hours: 17)),
                           createdAt: day,
                         ));
                       }
                     }
-
+                    
                     _syncStateFromDatabase();
                   },
                   icon: const Icon(Icons.insights, size: 16),

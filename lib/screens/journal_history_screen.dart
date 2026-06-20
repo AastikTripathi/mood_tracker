@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/thought.dart';
 import '../services/database_service.dart';
+import '../widgets/thought_detail_dialog.dart';
 
 /// Renders a fully searchable chronological catalog showing NLP categorizations
 /// and intelligent "past echoes" connections.
@@ -15,6 +16,8 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
   final DatabaseService _db = DatabaseService();
   List<Thought> _allThoughts = [];
   List<Thought> _filteredThoughts = [];
+  List<dynamic> _allHabitLogs = [];
+  List<dynamic> _availableHabits = [];
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -31,9 +34,13 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
 
   void _loadData() {
     final list = _db.getThoughts();
+    final habitDefs = _db.getHabitDefinitions();
+    final allLogs = _db.getHabitLogs();
     setState(() {
       _allThoughts = list;
       _filteredThoughts = list;
+      _availableHabits = habitDefs;
+      _allHabitLogs = allLogs;
     });
   }
 
@@ -45,7 +52,8 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
       } else {
         _filteredThoughts = _allThoughts.where((t) {
           return t.textContent.toLowerCase().contains(query) ||
-              t.categories.any((c) => c.toLowerCase().contains(query));
+              t.categories.any((c) => c.toLowerCase().contains(query)) ||
+              t.userTags.any((ut) => ut.toLowerCase().contains(query));
         }).toList();
       }
     });
@@ -132,11 +140,21 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
   }
 
   Widget _buildHistoryCard(Thought thought, bool isDark) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withOpacity(0.02) : Colors.white,
+    return GestureDetector(
+      onTap: () {
+        ThoughtDetailDialog.show(
+          context,
+          thought: thought,
+          allThoughts: _allThoughts,
+          allHabitLogs: _allHabitLogs,
+          availableHabits: _availableHabits,
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withOpacity(0.02) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.teal.withOpacity(0.06)),
         boxShadow: [
@@ -204,6 +222,35 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
             ),
           ],
 
+          if (thought.userTags.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: thought.userTags.map((tag) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.teal.withOpacity(0.15)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.label_outline, size: 10, color: Colors.teal),
+                      const SizedBox(width: 4),
+                      Text(
+                        tag,
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.teal),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+
           // Intelligent Companion Linked Thought Box ("Past Echoes")
           if (thought.linkedThoughtId != null) ...[
             const SizedBox(height: 12),
@@ -239,6 +286,6 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
           ],
         ],
       ),
-    );
+    ),);
   }
 }
