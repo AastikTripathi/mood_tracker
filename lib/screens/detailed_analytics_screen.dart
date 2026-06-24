@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/thought.dart';
 import '../models/habit.dart';
 import '../models/physical_log.dart';
+import '../services/database_service.dart';
 
 const Color emerald = Color(0xFF10B981);
 
@@ -28,6 +29,31 @@ class DetailedAnalyticsScreen extends StatefulWidget {
 class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
   String _selectedTimeline = 'Week'; // Timeline filter: 'Week', 'Month', 'Year'
   DateTime? _selectedTimetableDate;
+  final DatabaseService _db = DatabaseService();
+  
+  Map<String, dynamic>? _regressionResults;
+  Map<String, dynamic>? _habitMetrics;
+  Map<String, dynamic>? _resilienceRoadmap;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMetrics();
+  }
+
+  void _loadMetrics() {
+    _db.init().then((_) {
+      if (mounted) {
+        setState(() {
+          _regressionResults = _db.performRidgeRegression();
+          _habitMetrics = _db.calculateHabitMetrics();
+          _resilienceRoadmap = _db.findResilienceRoadmap();
+          _isLoading = false;
+        });
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,15 +74,26 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Timeline Selector Row
-              Container(
-                margin: const EdgeInsets.only(bottom: 16),
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: Colors.teal))
+            : SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 1. Resilience Roadmap Card
+                    _buildResilienceRoadmapCard(isDark, cardBg, textThemeColor),
+
+                    // 2. Ridge Regression Isolated Drivers Card
+                    _buildRidgeRegressionCard(isDark, cardBg, textThemeColor),
+
+                    // 3. Routine Synergy & Decay Card
+                    _buildHabitSynergyAndDecayCard(isDark, cardBg, textThemeColor),
+
+                    // Timeline Selector Row
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   color: cardBg,
@@ -994,6 +1031,454 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
         color: color,
         borderRadius: BorderRadius.circular(2),
         border: isDark ? null : Border.all(color: Colors.black12, width: 0.5),
+      ),
+    );
+  }
+
+  Widget _buildResilienceRoadmapCard(bool isDark, Color cardBg, Color textColor) {
+    if (_resilienceRoadmap == null) return const SizedBox.shrink();
+
+    final roadmap = _resilienceRoadmap!;
+    final startDate = roadmap['startDate'] as DateTime;
+    final endDate = roadmap['endDate'] as DateTime;
+    final startMood = roadmap['startMood'] as double;
+    final endMood = roadmap['endMood'] as double;
+    final habits = roadmap['habits'] as List<dynamic>;
+
+    final List<HabitDefinition> matchedHabits = [];
+    for (var hid in habits) {
+      final match = widget.availableHabits.cast<HabitDefinition?>().firstWhere(
+        (h) => h!.id == hid || h.name == hid,
+        orElse: () => null,
+      );
+      if (match != null) matchedHabits.add(match);
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.teal.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.teal.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome, size: 20, color: Colors.teal),
+              const SizedBox(width: 8),
+              Text(
+                "Your Resilience Roadmap",
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            "The sanctuary matched your current 2-day physical/emotional state transition to a recovery cycle from the past:",
+            style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black87, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              _buildRoadmapPin(startDate, startMood.toInt(), isDark),
+              Expanded(
+                child: Container(
+                  height: 2,
+                  color: Colors.teal.withOpacity(0.3),
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+              ),
+              _buildRoadmapPin(endDate, endMood.toInt(), isDark, isEnd: true),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (matchedHabits.isNotEmpty) ...[
+            Text(
+              "Here are the core routines you focused on to bounce back:",
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: matchedHabits.map((habit) {
+                return Chip(
+                  avatar: Text(habit.iconEmoji),
+                  label: Text(
+                    habit.name,
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.teal.shade900),
+                  ),
+                  backgroundColor: isDark ? Colors.white.withOpacity(0.08) : Colors.teal.withOpacity(0.08),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Returning to these anchors today could help restore your balance. 🌿",
+              style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white70 : Colors.black87, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoadmapPin(DateTime date, int mood, bool isDark, {bool isEnd = false}) {
+    final label = "${date.day}/${date.month}";
+    final moodLabel = "$mood/10";
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isEnd ? emerald.withOpacity(0.15) : Colors.orangeAccent.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isEnd ? emerald.withOpacity(0.4) : Colors.orangeAccent.withOpacity(0.4)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            isEnd ? "Recovered" : "Low Point",
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: isEnd ? emerald : Colors.orangeAccent,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "$label ($moodLabel)",
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRidgeRegressionCard(bool isDark, Color cardBg, Color textColor) {
+    if (_regressionResults == null) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 24),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.teal.withOpacity(0.08)),
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.psychology_outlined, size: 20, color: Colors.teal),
+                const SizedBox(width: 8),
+                Text(
+                  "Isolating Your Mood Drivers",
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Tending the garden... Advanced regression analytics unlock after 10 days of entries with both thoughts and routine checks to filter out confounding variables.",
+              style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey, height: 1.4),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final coeffs = _regressionResults!['coefficients'] as Map<String, double>;
+    final sampleSize = _regressionResults!['sampleSize'] as int;
+
+    final double inertia = coeffs['mood_lag'] ?? 0.0;
+    final double sleepCoeff = coeffs['sleep'] ?? 0.0;
+    final double sleepLagCoeff = coeffs['sleep_lag'] ?? 0.0;
+    final double painCoeff = coeffs['pain'] ?? 0.0;
+    final double painLagCoeff = coeffs['pain_lag'] ?? 0.0;
+    final double seizuresCoeff = coeffs['seizures'] ?? 0.0;
+    final double seizuresLagCoeff = coeffs['seizures_lag'] ?? 0.0;
+    final double periodCoeff = coeffs['period'] ?? 0.0;
+
+    final List<Widget> habitRows = [];
+    coeffs.forEach((key, val) {
+      if (key.startsWith('habit_') && val.abs() > 0.05) {
+        final hid = key.replaceFirst('habit_', '');
+        final match = widget.availableHabits.cast<HabitDefinition?>().firstWhere(
+          (h) => h!.id == hid || h.name == hid,
+          orElse: () => null,
+        );
+        if (match != null) {
+          habitRows.add(_buildRegressionRow(
+            label: "${match.iconEmoji} ${match.name}",
+            value: val,
+            isDark: isDark,
+          ));
+        }
+      }
+    });
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.teal.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.psychology_outlined, size: 20, color: Colors.teal),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Isolating Your Mood Drivers",
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: Colors.teal.withOpacity(0.06), borderRadius: BorderRadius.circular(8)),
+                child: Text("N=$sampleSize days", style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.teal)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "These metrics use Ridge Regression to control for confounding parameters, separating the independent effect of each factor on your mood.",
+            style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.grey, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "Emotional & Physical Parameters",
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
+          ),
+          const SizedBox(height: 10),
+          _buildRegressionRow(
+            label: "Mood Inertia (Yesterday's Mood carryover)",
+            value: inertia,
+            isDark: isDark,
+            helpText: "Positive means mood naturally persists; negative means rapid fluctuation.",
+          ),
+          _buildRegressionRow(
+            label: "Today's Rest (Sleep hours today)",
+            value: sleepCoeff,
+            isDark: isDark,
+          ),
+          _buildRegressionRow(
+            label: "Yesterday's Rest (Sleep lag impact)",
+            value: sleepLagCoeff,
+            isDark: isDark,
+            helpText: "Measures carry-over effect of sleep.",
+          ),
+          _buildRegressionRow(
+            label: "Today's Chronic Pain Index",
+            value: painCoeff,
+            isDark: isDark,
+          ),
+          _buildRegressionRow(
+            label: "Yesterday's Pain Index (Pain lag impact)",
+            value: painLagCoeff,
+            isDark: isDark,
+          ),
+          if (seizuresCoeff.abs() > 0.05)
+            _buildRegressionRow(
+              label: "Today's Seizure Incident Count",
+              value: seizuresCoeff,
+              isDark: isDark,
+            ),
+          if (seizuresLagCoeff.abs() > 0.05)
+            _buildRegressionRow(
+              label: "Yesterday's Seizure count (Lag impact)",
+              value: seizuresLagCoeff,
+              isDark: isDark,
+            ),
+          if (periodCoeff.abs() > 0.05)
+            _buildRegressionRow(
+              label: "Active Cycle Day (Menstruation)",
+              value: periodCoeff,
+              isDark: isDark,
+            ),
+          if (habitRows.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            Text(
+              "Confounder-Free Routine Impacts",
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
+            ),
+            const SizedBox(height: 10),
+            ...habitRows,
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRegressionRow({
+    required String label,
+    required double value,
+    required bool isDark,
+    String? helpText,
+  }) {
+    final bool isPositive = value > 0;
+    final color = isPositive ? emerald : Colors.redAccent;
+    final valueText = (isPositive ? "+" : "") + value.toStringAsFixed(2);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                valueText,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color),
+              ),
+            ],
+          ),
+          if (helpText != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              helpText,
+              style: const TextStyle(fontSize: 9.5, color: Colors.grey, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHabitSynergyAndDecayCard(bool isDark, Color cardBg, Color textColor) {
+    if (_habitMetrics == null) return const SizedBox.shrink();
+
+    final metrics = _habitMetrics!;
+    final synergies = metrics['synergies'] as Map<String, double>;
+    final decays = metrics['decays'] as Map<String, double>;
+
+    if (synergies.isEmpty && decays.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.teal.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.hub_outlined, size: 20, color: Colors.teal),
+              const SizedBox(width: 8),
+              Text(
+                "Synergy & Routine Stagnation",
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Identifies compound routines that boost you when done together, and flags when routines begin to lose baseline impact.",
+            style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.grey, height: 1.4),
+          ),
+          if (synergies.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              "Synergistic Combinations",
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
+            ),
+            const SizedBox(height: 10),
+            ...synergies.entries.map((entry) {
+              final parts = entry.key.split('+');
+              final h1 = widget.availableHabits.cast<HabitDefinition?>().firstWhere((h) => h!.id == parts[0] || h.name == parts[0], orElse: () => null);
+              final h2 = widget.availableHabits.cast<HabitDefinition?>().firstWhere((h) => h!.id == parts[1] || h.name == parts[1], orElse: () => null);
+              if (h1 == null || h2 == null) return const SizedBox.shrink();
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "${h1.iconEmoji} ${h1.name} + ${h2.iconEmoji} ${h2.name}",
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: emerald.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                      child: Text("+${entry.value.toStringAsFixed(1)} boost", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: emerald)),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+          if (decays.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            Text(
+              "Routine Stagnation Warnings",
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orangeAccent.shade200),
+            ),
+            const SizedBox(height: 8),
+            ...decays.entries.map((entry) {
+              final h = widget.availableHabits.cast<HabitDefinition?>().firstWhere((habit) => habit!.id == entry.key || habit.name == entry.key, orElse: () => null);
+              if (h == null) return const SizedBox.shrink();
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orangeAccent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Your response to ${h.iconEmoji} ${h.name} has cooled down recently. Consider updating this habit to refresh its emotional benefits.",
+                        style: TextStyle(fontSize: 11, color: isDark ? Colors.white70 : Colors.black87, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ],
       ),
     );
   }

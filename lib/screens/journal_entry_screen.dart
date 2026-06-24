@@ -94,15 +94,19 @@ class _JournalEntryScreenState extends State<JournalEntryScreen> {
     DateTime? recoveredDate;
     int? recoveredScore;
 
-    for (int i = 0; i < sorted.length; i++) {
+    // Search backwards for the most recent low point that has a subsequent recovery
+    for (int i = sorted.length - 1; i >= 0; i--) {
       if (sorted[i].moodScore <= 4) {
-        lowDate = sorted[i].timestamp;
         for (int j = i + 1; j < sorted.length; j++) {
           if (sorted[j].moodScore >= 7) {
+            lowDate = sorted[i].timestamp;
             recoveredDate = sorted[j].timestamp;
             recoveredScore = sorted[j].moodScore;
             break;
           }
+        }
+        if (lowDate != null && recoveredDate != null) {
+          break;
         }
       }
     }
@@ -148,36 +152,22 @@ class _JournalEntryScreenState extends State<JournalEntryScreen> {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
 
-    // 1. Get current NLP category predictions
-    final currentCategories = _nlp.extractCategories(text);
+    // 1. Query history using semantic vector proximity search (low threshold to rank all entries)
+    final similarThoughts = _db.semanticSearch(text, targetThreshold: 0.10);
 
-    // 2. Query history using semantic vector proximity search (threshold 0.40)
-    final similarThoughts = _db.semanticSearch(text, targetThreshold: 0.40);
-
-    // 3. Gather unique tags & categories from similar past notes
+    // 2. Gather unique tags & categories from the top 3 most semantically similar past notes
     final Set<String> historicalSuggestions = {};
-    for (var thought in similarThoughts) {
+    for (var thought in similarThoughts.take(3)) {
       historicalSuggestions.addAll(thought.categories);
       historicalSuggestions.addAll(thought.userTags);
     }
 
-    // 4. Combine auto-extracted and historical tags
-    final Set<String> allSuggestions = {};
-    allSuggestions.addAll(currentCategories);
-    allSuggestions.addAll(historicalSuggestions);
-
     // Filter out tags already added by the user or general defaults
-    allSuggestions.removeWhere((tag) => _userTags.contains(tag) || tag == 'Reflection');
-
-    // Fallback: If no tags were extracted or matched from history, suggest a set of default mindful tags
-    if (allSuggestions.isEmpty) {
-      allSuggestions.addAll(['Quiet', 'Cozy', 'Grounded', 'Mindful', 'Vent', 'Grateful', 'Tired']);
-      allSuggestions.removeWhere((tag) => _userTags.contains(tag));
-    }
+    historicalSuggestions.removeWhere((tag) => _userTags.contains(tag) || tag == 'Reflection');
 
     setState(() {
-      _autoCategories = currentCategories;
-      _suggestedTags = allSuggestions.toList();
+      _autoCategories = historicalSuggestions.toList();
+      _suggestedTags = historicalSuggestions.toList();
       _isAnalyzed = true;
     });
 

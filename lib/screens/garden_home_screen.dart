@@ -819,11 +819,117 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: () async {
+                    final List<Map<String, dynamic>> seedReflections = [
+                      // High Mood / Calm / Active (Mood 8, 9, 10)
+                      {
+                        'mood': 9,
+                        'text': "A beautiful sunlit morning! Spent two hours tending to the lavender patches and potting new seedlings. The garden feels alive today.",
+                        'categories': ['Nature', 'Cozy', 'Grateful']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Woke up early and walked through the nearby park. The crisp morning air completely cleared my head. Feeling grounded and ready.",
+                        'categories': ['Nature', 'Grounded']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Cooked a wonderful dinner with fresh herbs from the window sill. Had a peaceful evening reading my new book by the window.",
+                        'categories': ['Cozy', 'Grateful', 'Reflection']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Finished a light jog in the afternoon. My energy levels are surprisingly high, and my body feels strong and flexible today.",
+                        'categories': ['Grounded', 'Nature']
+                      },
+                      {
+                        'mood': 10,
+                        'text': "An absolutely perfect day. Everything felt flowing and peaceful. Sat in the sun for an hour doing nothing but listening to the birds.",
+                        'categories': ['Cozy', 'Grateful', 'Reflection']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Quiet evening. Made a hot cup of chamomile tea, put on some ambient music, and spent time sketching. A solid, restful day.",
+                        'categories': ['Cozy', 'Grounded']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Accomplished all my study goals today without feeling rushed or anxious. The pace of my day felt completely under my control.",
+                        'categories': ['Grounded', 'Reflection']
+                      },
+                      // Medium Mood / Balanced (Mood 5, 6, 7)
+                      {
+                        'mood': 7,
+                        'text': "Spent a quiet afternoon cleaning the apartment and rearranging the bookshelf. A productive but low-key day.",
+                        'categories': ['Grounded', 'Reflection']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "Feeling a bit distracted today. Work was busy, but I managed to take a few deep breaths and step outside during my lunch break.",
+                        'categories': ['Grounded', 'Reflection']
+                      },
+                      {
+                        'mood': 5,
+                        'text': "A bit of a mixed bag today. Had a slight headache in the afternoon, but a short nap helped restore my baseline energy.",
+                        'categories': ['Tired', 'Reflection']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "Decent day overall. Met up with a friend for a quick tea. Nice to catch up, though I feel ready for a quiet night in.",
+                        'categories': ['Grounded', 'Cozy']
+                      },
+                      {
+                        'mood': 7,
+                        'text': "The weather was overcast, which matched my mood. Did some journaling and organized my workspace. Feeling balanced.",
+                        'categories': ['Reflection', 'Grounded']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "Tired but content. Got through a heavy task list. Planning to rest early tonight and skip any late screen time.",
+                        'categories': ['Tired', 'Reflection']
+                      },
+                      // Low Mood / Burdened / Crisis (Mood 2, 3, 4)
+                      {
+                        'mood': 3,
+                        'text': "Felt extremely low and drained today. My body feels heavy, and chronic pain is flaring up. Just staying in bed with heat pads.",
+                        'categories': ['Tired', 'Vent']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "A really challenging day. Had a seizure incident in the morning which left me feeling disoriented and physically exhausted.",
+                        'categories': ['Tired', 'Vent']
+                      },
+                      {
+                        'mood': 4,
+                        'text': "Anxious and overwhelmed by work tasks. The deadlines are piling up and my focus is completely shattered. Need to step back.",
+                        'categories': ['Vent', 'Tired']
+                      },
+                      {
+                        'mood': 2,
+                        'text': "Completely overwhelmed today. The pain levels are making it hard to concentrate on anything. Emotional exhaustion has set in.",
+                        'categories': ['Vent', 'Tired']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "Very quiet, heavy headspace today. Felt isolated and lacked the energy to interact with anyone. Just trying to breathe through it.",
+                        'categories': ['Vent', 'Reflection']
+                      },
+                      {
+                        'mood': 4,
+                        'text': "Woke up after a night of restless sleep loss. Everything feels slightly harder to manage when fatigue is this deep.",
+                        'categories': ['Tired', 'Vent']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "Struggling with cycle symptoms. Severe cramps and brain fog made it a very unproductive day. Trying not to judge myself.",
+                        'categories': ['Tired', 'Vent']
+                      }
+                    ];
+
                     final now = DateTime.now();
-                    for (int i = 1; i <= 45; i++) {
+                    for (int i = 45; i >= 1; i--) {
                       final day = now.subtract(Duration(days: i));
                       
-                      // 1. Determine period cycle properties (approx 28 day cycle, days 1-5 active)
+                      // 1. Determine period cycle properties
                       final cycleDay = i % 28;
                       final isPeriod = cycleDay >= 1 && cycleDay <= 5;
                       String flow = 'None';
@@ -834,17 +940,24 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         if (cycleDay == 3) symptoms.add('Headache');
                       }
                       
-                      // 2. Correlate mood, pain, and sleep
+                      // 2. Correlate mood, pain, and sleep with engineered patterns
                       double pain = 0.0;
                       double sleepHours = 7.5;
                       int mood = 7;
                       
-                      if (isPeriod) {
+                      if (i == 40 || i == 20) {
+                        mood = 3;
+                        pain = 7.0;
+                        sleepHours = 5.5;
+                      } else if (i == 39 || i == 19) {
+                        mood = 8;
+                        pain = 2.0;
+                        sleepHours = 8.0;
+                      } else if (isPeriod) {
                         pain = cycleDay == 3 ? 6.5 : 4.0;
                         sleepHours = 6.0;
                         mood = cycleDay == 3 ? 3 : 5;
                       } else {
-                        // Some other pain flare-up days
                         if (i % 12 == 0) {
                           pain = 5.5;
                           sleepHours = 5.0;
@@ -855,15 +968,28 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           mood = (i % 7 == 0) ? 6 : ((i % 10 == 0) ? 9 : 8);
                         }
                       }
-                      
-                      // 3. Seizures: simulate on low sleep & high pain days, or every 15 days
-                      List<String> seizures = [];
-                      if ((sleepHours < 6.5 && pain > 5.0) || (i % 15 == 0)) {
-                        seizures = ["10:30 AM"];
-                        if (i % 15 == 0) seizures.add("04:15 PM");
+
+                      // Habit Decay: Napping boosts mood in past but drags it recently
+                      bool logNapping = false;
+                      if (i >= 15) {
+                        if (i % 3 == 0) {
+                          logNapping = true;
+                          mood = math.max(mood, 8);
+                        }
+                      } else {
+                        if (i % 3 == 0) {
+                          logNapping = true;
+                          mood = math.min(mood, 4);
+                        }
                       }
                       
-                      // 4. Save Physical Log
+                      // Seizures
+                      List<String> seizures = [];
+                      if ((sleepHours < 6.5 && pain > 5.0) || (i == 40 || i == 20)) {
+                        seizures = ["10:30 AM"];
+                      }
+                      
+                      // Save Physical Log
                       await _db.savePhysicalLog(PhysicalLog(
                         date: day,
                         sleepHours: sleepHours,
@@ -877,19 +1003,17 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         cycleSymptoms: symptoms,
                       ));
                       
-                      // 5. Save Thoughts
-                      String text;
-                      List<String> categories;
-                      if (mood <= 4) {
-                        text = "Felt really low and drained today. Pain levels were tough to manage, just rested.";
-                        categories = ['Tired', 'Vent'];
-                      } else if (mood >= 8) {
-                        text = "A lovely day! Took a walk outside in the sunshine and spent time in the garden.";
-                        categories = ['Nature', 'Cozy', 'Grateful'];
-                      } else {
-                        text = "Felt decent. Got some reading done and had a quiet, grounded afternoon.";
-                        categories = ['Grounded', 'Reflection'];
-                      }
+                      // Save Thoughts using dynamically matched seed reflections
+                      final matchingReflections = seedReflections.where((ref) {
+                        final int m = ref['mood'] as int;
+                        if (mood <= 4) return m <= 4;
+                        if (mood >= 8) return m >= 8;
+                        return m >= 5 && m <= 7;
+                      }).toList();
+
+                      final selectedRef = matchingReflections[i % matchingReflections.length];
+                      final text = selectedRef['text'] as String;
+                      final categories = List<String>.from(selectedRef['categories'] as List);
                       
                       await _db.saveThought(Thought(
                         id: 'mock_day_$i',
@@ -900,8 +1024,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         userTags: [categories.first],
                       ));
                       
-                      // 6. Save Habit Logs
-                      // Seizures
+                      // Save Habit Logs
                       for (final timeStr in seizures) {
                         final dt = DateTime(day.year, day.month, day.day, 10, 30);
                         await _db.saveHabitLog(HabitLog(
@@ -923,7 +1046,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       }
                       
                       // Napping
-                      if (sleepHours < 7.0) {
+                      if (logNapping) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_napping_$i',
                           habitId: 'napping',
@@ -932,8 +1055,17 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         ));
                       }
                       
-                      // Gardening
-                      if (mood >= 8 && i % 2 == 0) {
+                      // Gardening & Stepping Out (Synergy Combo)
+                      // If both are completed, boost mood to 9/10
+                      bool logGardening = (mood >= 8 && i % 2 == 0) || (i == 39 || i == 19);
+                      bool logStepping = (mood >= 6 && i % 3 != 0) || (i == 39 || i == 19);
+                      
+                      if (logGardening && logStepping) {
+                        // Synergy boost
+                        mood = 9;
+                      }
+
+                      if (logGardening) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_gardening_$i',
                           habitId: 'gardening',
@@ -942,8 +1074,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         ));
                       }
                       
-                      // Stepping Out
-                      if (mood >= 6 && i % 3 != 0) {
+                      if (logStepping) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_stepping_$i',
                           habitId: 'stepping_out',

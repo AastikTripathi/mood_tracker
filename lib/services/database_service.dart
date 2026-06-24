@@ -7,6 +7,27 @@ import '../models/thought.dart';
 import '../models/physical_log.dart';
 import '../models/habit.dart';
 import 'nlp_service.dart';
+import 'matrix_math.dart';
+
+class DailyRecord {
+  final DateTime date;
+  final double mood;
+  final double sleep;
+  final double pain;
+  final double seizures;
+  final double period;
+  final Set<String> habits;
+
+  DailyRecord({
+    required this.date,
+    required this.mood,
+    required this.sleep,
+    required this.pain,
+    required this.seizures,
+    required this.period,
+    required this.habits,
+  });
+}
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -151,25 +172,40 @@ class DatabaseService {
 
   /// Instantly scans history using precompiled vector math without reprocessing text
   List<Thought> semanticSearch(String query, {double targetThreshold = 0.35}) {
-    // Convert current query text string into a baseline matching vector
     final queryVector = _nlp.vectorize(query);
+    final bool isModelFailed = queryVector.every((x) => x == 0.0);
     
     final List<MapEntry<Thought, double>> scoredEntries = [];
 
     for (final thought in _thoughts) {
-      final pastVector = thought.embedding ?? _nlp.vectorize(thought.textContent);
-      if (thought.embedding == null) {
-        thought.embedding = pastVector;
+      double similarity = 0.0;
+      if (isModelFailed) {
+        similarity = _calculateTextJaccard(query, thought.textContent);
+      } else {
+        final pastVector = thought.embedding ?? _nlp.vectorize(thought.textContent);
+        if (thought.embedding == null) {
+          thought.embedding = pastVector;
+        }
+        similarity = _nlp.calculateSimilarity(queryVector, pastVector);
       }
-      final similarity = _nlp.calculateSimilarity(queryVector, pastVector);
+
       if (similarity >= targetThreshold) {
         scoredEntries.add(MapEntry(thought, similarity));
       }
     }
 
-    // Sort descending by highest proximity score
     scoredEntries.sort((a, b) => b.value.compareTo(a.value));
     return scoredEntries.map((e) => e.key).toList();
+  }
+
+  double _calculateTextJaccard(String s1, String s2) {
+    final w1 = s1.toLowerCase().replaceAll(RegExp(r"[.,\/#!$%\^&\*;:{}=\-_`~()]"), " ").split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    final w2 = s2.toLowerCase().replaceAll(RegExp(r"[.,\/#!$%\^&\*;:{}=\-_`~()]"), " ").split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    if (w1.isEmpty && w2.isEmpty) return 1.0;
+    if (w1.isEmpty || w2.isEmpty) return 0.0;
+    final intersection = w1.intersection(w2).length;
+    final union = w1.union(w2).length;
+    return intersection / union;
   }
 
   /// Groups historical thought data dynamically into organic mood spaces
@@ -361,5 +397,309 @@ class DatabaseService {
   String _formatDate(DateTime date) {
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return "${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}";
+  }
+
+  List<DailyRecord> _compileDailyRecords() {
+    final Map<String, List<Thought>> thoughtsByDate = {};
+    for (var t in _thoughts) {
+      final key = "${t.timestamp.year}-${t.timestamp.month}-${t.timestamp.day}";
+      thoughtsByDate.putIfAbsent(key, () => []).add(t);
+    }
+
+    final Map<String, PhysicalLog> physicalByDate = {};
+    for (var p in _physicalLogs) {
+      final key = "${p.date.year}-${p.date.month}-${p.date.day}";
+      physicalByDate[key] = p;
+    }
+
+    final Map<String, Set<String>> habitsByDate = {};
+    for (var hl in _habitLogs) {
+      final key = "${hl.occurrenceDate.year}-${hl.occurrenceDate.month}-${hl.occurrenceDate.day}";
+      habitsByDate.putIfAbsent(key, () => {}).add(hl.habitId);
+    }
+
+    final List<DailyRecord> records = [];
+    for (final dateKey in thoughtsByDate.keys) {
+      final dayThoughts = thoughtsByDate[dateKey]!;
+      if (dayThoughts.isEmpty) continue;
+
+      double avgMood = dayThoughts.map((t) => t.moodScore.toDouble()).reduce((a, b) => a + b) / dayThoughts.length;
+
+      final pLog = physicalByDate[dateKey];
+      final double sleep = pLog?.sleepHours ?? 7.0;
+      final double pain = pLog?.customPainLevel ?? 0.0;
+      final double seizures = (pLog?.customSeizuresCount ?? 0).toDouble();
+      final double period = (pLog?.isPeriodDay == true || pLog?.flowLevel != 'None') ? 1.0 : 0.0;
+
+      final dayHabits = habitsByDate[dateKey] ?? {};
+
+      final parts = dateKey.split('-');
+      final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+
+      records.add(DailyRecord(
+        date: date,
+        mood: avgMood,
+        sleep: sleep,
+        pain: pain,
+        seizures: seizures,
+        period: period,
+        habits: dayHabits,
+      ));
+    }
+
+    records.sort((a, b) => a.date.compareTo(b.date));
+    return records;
+  }
+
+  /// Runs multi-variable regularized Ridge Regression to isolate independent effects on mood.
+  Map<String, dynamic>? performRidgeRegression() {
+    final records = _compileDailyRecords();
+    if (records.length < 10) return null;
+
+    final List<String> habitIds = _habitDefinitions.map((h) => h.id).where((id) => id != 'seizure').toList();
+
+    final List<String> featureNames = [
+      'intercept',
+      'mood_lag',
+      'sleep',
+      'sleep_lag',
+      'pain',
+      'pain_lag',
+      'seizures',
+      'seizures_lag',
+      'period',
+    ];
+    for (var hid in habitIds) {
+      featureNames.add('habit_$hid');
+    }
+
+    int numFeatures = featureNames.length;
+    List<List<double>> X = [];
+    List<double> y = [];
+
+    for (int t = 1; t < records.length; t++) {
+      final today = records[t];
+      final yesterday = records[t - 1];
+
+      if (today.date.difference(yesterday.date).inDays > 3) continue;
+
+      List<double> row = List.filled(numFeatures, 0.0);
+      row[0] = 1.0;
+      row[1] = yesterday.mood;
+      row[2] = today.sleep;
+      row[3] = yesterday.sleep;
+      row[4] = today.pain;
+      row[5] = yesterday.pain;
+      row[6] = today.seizures;
+      row[7] = yesterday.seizures;
+      row[8] = today.period;
+
+      for (int i = 0; i < habitIds.length; i++) {
+        row[9 + i] = today.habits.contains(habitIds[i]) ? 1.0 : 0.0;
+      }
+
+      X.add(row);
+      y.add(today.mood);
+    }
+
+    if (X.length < 5) return null;
+
+    final Xt = MatrixMath.transpose(X);
+    final XtX = MatrixMath.multiply(Xt, X);
+
+    double lambda = 1.0;
+    for (int i = 0; i < numFeatures; i++) {
+      XtX[i][i] += lambda;
+    }
+
+    final invXtX = MatrixMath.invert(XtX);
+    if (invXtX == null) return null;
+
+    List<double> Xty = List.filled(numFeatures, 0.0);
+    for (int i = 0; i < numFeatures; i++) {
+      double sum = 0.0;
+      for (int j = 0; j < X.length; j++) {
+        sum += Xt[i][j] * y[j];
+      }
+      Xty[i] = sum;
+    }
+
+    final List<double> beta = MatrixMath.multiplyVector(invXtX, Xty);
+
+    final Map<String, double> coefficients = {};
+    for (int i = 0; i < numFeatures; i++) {
+      coefficients[featureNames[i]] = beta[i];
+    }
+
+    return {
+      'coefficients': coefficients,
+      'sampleSize': X.length,
+    };
+  }
+
+  /// Calculates dynamic habit deviations, compound synergies, and novelty decay (habituation).
+  Map<String, dynamic> calculateHabitMetrics() {
+    final thoughts = _thoughts;
+    if (thoughts.isEmpty) {
+      return {
+        'baselineWeights': <String, double>{},
+        'synergies': <String, double>{},
+        'decays': <String, double>{},
+      };
+    }
+
+    final double baselineMood = thoughts.map((t) => t.moodScore.toDouble()).reduce((a, b) => a + b) / thoughts.length;
+
+    final Map<String, Set<String>> habitsByDate = {};
+    for (var hl in _habitLogs) {
+      if (hl.habitId == 'seizure') continue; // Exclude seizure incidents from routine habit metrics
+      final key = "${hl.occurrenceDate.year}-${hl.occurrenceDate.month}-${hl.occurrenceDate.day}";
+      habitsByDate.putIfAbsent(key, () => {}).add(hl.habitId);
+    }
+
+    final Map<String, double> moodByDate = {};
+    final Map<String, List<Thought>> thoughtsByDate = {};
+    for (var t in thoughts) {
+      final key = "${t.timestamp.year}-${t.timestamp.month}-${t.timestamp.day}";
+      thoughtsByDate.putIfAbsent(key, () => []).add(t);
+    }
+    for (var dateKey in thoughtsByDate.keys) {
+      final list = thoughtsByDate[dateKey]!;
+      moodByDate[dateKey] = list.map((t) => t.moodScore.toDouble()).reduce((a, b) => a + b) / list.length;
+    }
+
+    final Map<String, List<double>> moodForHabit = {};
+    final Map<String, List<double>> recentMoodForHabit = {};
+    final DateTime now = DateTime.now();
+
+    for (var dateKey in moodByDate.keys) {
+      final double mood = moodByDate[dateKey]!;
+      final activeHabits = habitsByDate[dateKey] ?? {};
+
+      final parts = dateKey.split('-');
+      final date = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+      final isRecent = now.difference(date).inDays <= 14;
+
+      for (var hid in activeHabits) {
+        moodForHabit.putIfAbsent(hid, () => []).add(mood);
+        if (isRecent) {
+          recentMoodForHabit.putIfAbsent(hid, () => []).add(mood);
+        }
+      }
+    }
+
+    final Map<String, double> habitWeights = {};
+    for (var hid in moodForHabit.keys) {
+      final avg = moodForHabit[hid]!.reduce((a, b) => a + b) / moodForHabit[hid]!.length;
+      habitWeights[hid] = avg - baselineMood;
+    }
+
+    final Map<String, double> decays = {};
+    for (var hid in recentMoodForHabit.keys) {
+      if (moodForHabit[hid]!.length >= 4 && recentMoodForHabit[hid]!.length >= 2) {
+        final avgRecent = recentMoodForHabit[hid]!.reduce((a, b) => a + b) / recentMoodForHabit[hid]!.length;
+        final recentWeight = avgRecent - baselineMood;
+        final lifetimeWeight = habitWeights[hid] ?? 0.0;
+
+        if (lifetimeWeight > 0.3 && recentWeight < (lifetimeWeight * 0.5)) {
+          decays[hid] = recentWeight - lifetimeWeight;
+        }
+      }
+    }
+
+    final Map<String, List<double>> moodForPairs = {};
+    for (var dateKey in moodByDate.keys) {
+      final double mood = moodByDate[dateKey]!;
+      final activeHabits = (habitsByDate[dateKey] ?? {}).toList();
+
+      for (int i = 0; i < activeHabits.length; i++) {
+        for (int j = i + 1; j < activeHabits.length; j++) {
+          final pairKey = activeHabits[i].compareTo(activeHabits[j]) < 0
+              ? "${activeHabits[i]}+${activeHabits[j]}"
+              : "${activeHabits[j]}+${activeHabits[i]}";
+          moodForPairs.putIfAbsent(pairKey, () => []).add(mood);
+        }
+      }
+    }
+
+    final Map<String, double> synergies = {};
+    for (var pairKey in moodForPairs.keys) {
+      if (moodForPairs[pairKey]!.length >= 2) {
+        final avgPair = moodForPairs[pairKey]!.reduce((a, b) => a + b) / moodForPairs[pairKey]!.length;
+        final pairWeight = avgPair - baselineMood;
+
+        final parts = pairKey.split('+');
+        final w1 = habitWeights[parts[0]] ?? 0.0;
+        final w2 = habitWeights[parts[1]] ?? 0.0;
+
+        if (pairWeight > (w1 + w2) + 0.3) {
+          synergies[pairKey] = pairWeight - (w1 + w2);
+        }
+      }
+    }
+
+    return {
+      'baselineWeights': habitWeights,
+      'synergies': synergies,
+      'decays': decays,
+    };
+  }
+
+  /// RPG-Style transition matching to find a resilience roadmap based on 2-day historical cycles.
+  Map<String, dynamic>? findResilienceRoadmap() {
+    final records = _compileDailyRecords();
+    if (records.length < 5) return null;
+
+    final today = records.last;
+    final yesterday = records[records.length - 2];
+
+    if (today.date.difference(yesterday.date).inDays > 2) return null;
+
+    final double currentDeltaMood = today.mood - yesterday.mood;
+    final double currentDeltaPain = today.pain - yesterday.pain;
+    final double currentDeltaSeizures = today.seizures - yesterday.seizures;
+    final double currentDeltaSleep = today.sleep - yesterday.sleep;
+
+    if (today.mood > 5) return null;
+
+    double bestDistance = 9999.0;
+    DailyRecord? matchStart;
+    DailyRecord? matchEnd;
+
+    for (int i = 1; i < records.length - 2; i++) {
+      final pastStart = records[i - 1];
+      final pastEnd = records[i];
+
+      if (pastEnd.date.difference(pastStart.date).inDays > 2) continue;
+
+      final pastDeltaMood = pastEnd.mood - pastStart.mood;
+      if (pastDeltaMood < 1.5) continue;
+
+      final dMood = (yesterday.mood - pastStart.mood) / 9.0;
+      final dPain = (currentDeltaPain - (pastEnd.pain - pastStart.pain)) / 10.0;
+      final dSeizures = (currentDeltaSeizures - (pastEnd.seizures - pastStart.seizures)) / 5.0;
+      final dSleep = (currentDeltaSleep - (pastEnd.sleep - pastStart.sleep)) / 10.0;
+
+      final distance = math.sqrt(dMood * dMood + dPain * dPain + dSeizures * dSeizures + dSleep * dSleep);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        matchStart = pastStart;
+        matchEnd = pastEnd;
+      }
+    }
+
+    if (matchStart != null && matchEnd != null) {
+      return {
+        'startDate': matchStart.date,
+        'endDate': matchEnd.date,
+        'startMood': matchStart.mood,
+        'endMood': matchEnd.mood,
+        'distance': bestDistance,
+        'habits': matchEnd.habits.toList(),
+      };
+    }
+
+    return null;
   }
 }
