@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/thought.dart';
+import '../models/habit.dart';
 import '../services/database_service.dart';
 import '../widgets/thought_detail_dialog.dart';
 
@@ -15,9 +16,10 @@ class JournalHistoryScreen extends StatefulWidget {
 class JournalHistoryScreenState extends State<JournalHistoryScreen> {
   final DatabaseService _db = DatabaseService();
   List<Thought> _allThoughts = [];
-  List<Thought> _filteredThoughts = [];
   List<dynamic> _allHabitLogs = [];
   List<dynamic> _availableHabits = [];
+  List<dynamic> _allTimelineItems = [];
+  List<dynamic> _filteredItems = [];
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -36,11 +38,24 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
     final list = _db.getThoughts();
     final habitDefs = _db.getHabitDefinitions();
     final allLogs = _db.getHabitLogs();
+
+    final List<dynamic> combined = [];
+    combined.addAll(list);
+    combined.addAll(allLogs);
+
+    // Sort chronologically (newest to oldest)
+    combined.sort((a, b) {
+      final DateTime timeA = a is Thought ? a.timestamp : (a as HabitLog).occurrenceDate;
+      final DateTime timeB = b is Thought ? b.timestamp : (b as HabitLog).occurrenceDate;
+      return timeB.compareTo(timeA);
+    });
+
     setState(() {
       _allThoughts = list;
-      _filteredThoughts = list;
       _availableHabits = habitDefs;
       _allHabitLogs = allLogs;
+      _allTimelineItems = combined;
+      _filteredItems = combined;
     });
   }
 
@@ -48,12 +63,22 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
     final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
-        _filteredThoughts = _allThoughts;
+        _filteredItems = _allTimelineItems;
       } else {
-        _filteredThoughts = _allThoughts.where((t) {
-          return t.textContent.toLowerCase().contains(query) ||
-              t.categories.any((c) => c.toLowerCase().contains(query)) ||
-              t.userTags.any((ut) => ut.toLowerCase().contains(query));
+        _filteredItems = _allTimelineItems.where((item) {
+          if (item is Thought) {
+            return item.textContent.toLowerCase().contains(query) ||
+                item.categories.any((c) => c.toLowerCase().contains(query)) ||
+                item.userTags.any((ut) => ut.toLowerCase().contains(query));
+          } else if (item is HabitLog) {
+            final def = _availableHabits.cast<HabitDefinition?>().firstWhere(
+              (h) => h!.id == item.habitId || h.name == item.habitId,
+              orElse: () => null,
+            );
+            final name = def != null ? def.name : item.habitId;
+            return name.toLowerCase().contains(query);
+          }
+          return false;
         }).toList();
       }
     });
@@ -87,7 +112,7 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
                 controller: _searchController,
                 style: const TextStyle(fontSize: 14),
                 decoration: InputDecoration(
-                  hintText: "Search thoughts or automatic categories...",
+                  hintText: "Search thoughts, categories, or routines...",
                   prefixIcon: const Icon(Icons.search, color: Colors.teal, size: 20),
                   filled: true,
                   fillColor: isDark ? Colors.white.withOpacity(0.02) : Colors.white,
@@ -108,7 +133,7 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  "${_filteredThoughts.length} moments saved in sanctuary",
+                  "${_filteredItems.length} records saved in sanctuary",
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
                 ),
               ),
@@ -116,19 +141,23 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
 
               // Stream of historical entries
               Expanded(
-                child: _filteredThoughts.isEmpty
+                child: _filteredItems.isEmpty
                     ? const Center(
                   child: Text(
-                    "No quiet moments match that search... 🌿",
+                    "No check-ins match that search... 🌿",
                     style: TextStyle(fontSize: 13, color: Colors.grey),
                   ),
                 )
                     : ListView.builder(
                   physics: const BouncingScrollPhysics(),
-                  itemCount: _filteredThoughts.length,
+                  itemCount: _filteredItems.length,
                   itemBuilder: (context, index) {
-                    final item = _filteredThoughts[index];
-                    return _buildHistoryCard(item, isDark);
+                    final item = _filteredItems[index];
+                    if (item is Thought) {
+                      return _buildHistoryCard(item, isDark);
+                    } else {
+                      return _buildHabitHistoryCard(item as HabitLog, isDark);
+                    }
                   },
                 ),
               ),
@@ -287,5 +316,67 @@ class JournalHistoryScreenState extends State<JournalHistoryScreen> {
         ],
       ),
     ),);
+  }
+
+  Widget _buildHabitHistoryCard(HabitLog log, bool isDark) {
+    dynamic matchedHabit;
+    for (var h in _availableHabits) {
+      if (h.id == log.habitId || h.name == log.habitId) {
+        matchedHabit = h;
+        break;
+      }
+    }
+    final icon = matchedHabit != null ? matchedHabit.iconEmoji : '🌿';
+    final name = matchedHabit != null ? matchedHabit.name : log.habitId;
+
+    final hour = log.occurrenceDate.hour;
+    final minute = log.occurrenceDate.minute.toString().padLeft(2, '0');
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final formattedHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+    final timeStr = "$formattedHour:$minute $period";
+    final dateStr = "${log.occurrenceDate.day}/${log.occurrenceDate.month}/${log.occurrenceDate.year}";
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.015) : Colors.black.withOpacity(0.015),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.withOpacity(0.05)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.teal.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Text(icon, style: const TextStyle(fontSize: 20)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "Completed on $dateStr at $timeStr",
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

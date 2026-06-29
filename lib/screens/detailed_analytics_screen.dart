@@ -3,6 +3,7 @@ import '../models/thought.dart';
 import '../models/habit.dart';
 import '../models/physical_log.dart';
 import '../services/database_service.dart';
+import 'developer_view_screen.dart';
 
 const Color emerald = Color(0xFF10B981);
 
@@ -36,24 +37,8 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
   Map<String, dynamic>? _resilienceRoadmap;
   bool _isLoading = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadMetrics();
-  }
 
-  void _loadMetrics() {
-    _db.init().then((_) {
-      if (mounted) {
-        setState(() {
-          _regressionResults = _db.performRidgeRegression();
-          _habitMetrics = _db.calculateHabitMetrics();
-          _resilienceRoadmap = _db.findResilienceRoadmap();
-          _isLoading = false;
-        });
-      }
-    });
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -72,6 +57,26 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.terminal_rounded, color: Colors.teal),
+            tooltip: "Engine Diagnostics",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => DeveloperViewScreen(
+                    historyThoughts: widget.historyThoughts,
+                    availableHabits: widget.availableHabits,
+                    allHabitLogs: widget.allHabitLogs,
+                    physicalLogs: widget.physicalLogs,
+                    isTwilight: widget.isTwilight,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: SafeArea(
         child: _isLoading
@@ -146,6 +151,11 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
               _buildSectionHeader("Menstrual & Pain Progression Timeline", Icons.timeline, isDark),
               const SizedBox(height: 12),
               _buildCyclePainProgressionGraph(isDark, cardBg),
+              const SizedBox(height: 24),
+
+              _buildSectionHeader("Cycle Forecasting & Phase Mapping", Icons.calendar_month, isDark),
+              const SizedBox(height: 12),
+              _buildCycleForecastingCard(isDark, cardBg, textThemeColor),
               const SizedBox(height: 24),
 
               _buildSectionHeader("Habits & Check-in Timetable", Icons.schedule, isDark),
@@ -1326,9 +1336,123 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
             const SizedBox(height: 10),
             ...habitRows,
           ],
+
+          // Conversational Copilot Insights Action Plan
+          const SizedBox(height: 18),
+          const Divider(height: 1),
+          const SizedBox(height: 14),
+          Text(
+            "Personalized Copilot Action Plan",
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: isDark ? Colors.teal.shade200 : Colors.teal.shade700),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.teal.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.teal.withOpacity(0.08)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: _generateConversationalInsights(coeffs).map((insight) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.circle, size: 4.5, color: Colors.teal),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          insight,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  List<String> _generateConversationalInsights(Map<String, double> coeffs) {
+    final List<String> insights = [];
+
+    final double sleep = coeffs['sleep'] ?? 0.0;
+    final double sleepLag = coeffs['sleep_lag'] ?? 0.0;
+    final double pain = coeffs['pain'] ?? 0.0;
+    final double seizures = coeffs['seizures'] ?? 0.0;
+    final double period = coeffs['period'] ?? 0.0;
+
+    if (sleep > 0.15) {
+      insights.add("🛌 Prioritize Sleep: Rest hours show a strong positive impact of +${sleep.toStringAsFixed(2)} on your baseline. Getting adequate sleep is your primary emotional buffer.");
+    } else if (sleep < -0.15) {
+      insights.add("☁️ Restless Sleep: Sleep duration carries a negative weight of ${sleep.toStringAsFixed(2)}, meaning oversleeping or erratic sleep might trigger brain fog.");
+    }
+
+    if (sleepLag > 0.15) {
+      insights.add("🔄 Sleep Debt: Yesterday's sleep has a powerful carryover effect (+${sleepLag.toStringAsFixed(2)}). A single bad night affects you for two days; keep rest consistent.");
+    }
+
+    if (pain < -0.1) {
+      insights.add("🩺 Pain Buffer: Chronic pain drags your mood baseline down by ${pain.toStringAsFixed(2)}. On high-pain days, reduce physical demands early.");
+    }
+
+    if (seizures < -0.05) {
+      insights.add("⚡ Seizure Recovery: Seizure episodes carry a negative pull of ${seizures.toStringAsFixed(2)} on your daily energy reserve. Prioritize immediate sensory rest post-seizure.");
+    }
+
+    if (period.abs() > 0.05) {
+      if (period < 0) {
+        insights.add("🌸 Menstrual Sensitivity: Active period days drop your daily baseline by ${period.toStringAsFixed(2)}. Give yourself extra permission to slow down during menses.");
+      } else {
+        insights.add("🌸 Cycle Baseline: Active cycle days exhibit a minor positive link of +${period.toStringAsFixed(2)} to your baseline, showing resilience during your menses.");
+      }
+    }
+
+    coeffs.forEach((key, val) {
+      if (key.startsWith('habit_') && val.abs() > 0.05) {
+        final hid = key.replaceFirst('habit_', '');
+        final match = widget.availableHabits.cast<HabitDefinition?>().firstWhere(
+          (h) => h!.id == hid || h.name == hid,
+          orElse: () => null,
+        );
+        if (match != null) {
+          final String nameLower = match.name.toLowerCase();
+          final bool isNegativeStressor = nameLower.contains('caffeine') || 
+                                          nameLower.contains('skipped') || 
+                                          nameLower.contains('late') || 
+                                          nameLower.contains('skip') ||
+                                          nameLower.contains('junk');
+
+          if (val > 0) {
+            insights.add("${match.iconEmoji} Boosting Routine: Completing '${match.name}' acts as an independent mood booster (+${val.toStringAsFixed(2)}). Try scheduling this routine today!");
+          } else {
+            if (isNegativeStressor) {
+              insights.add("${match.iconEmoji} Routine Strain: '${match.name}' shows a negative pull (${val.toStringAsFixed(2)}) on your mood. Consider adjusting this habit to reduce emotional friction.");
+            } else {
+              // Healthy habit used as coping/support routine
+              insights.add("${match.iconEmoji} Support Routine: You naturally turn to '${match.name}' (${val.toStringAsFixed(2)}) on days when your mood is already low. This is a great active coping mechanism to ground yourself.");
+            }
+          }
+        }
+      }
+    });
+
+    if (insights.isEmpty) {
+      insights.add("🌱 Keep Logging: Collect more days of routine logs and symptom ratings to unlock personalized coping actions.");
+    }
+
+    return insights;
   }
 
   Widget _buildRegressionRow({
@@ -1480,6 +1604,570 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  // Dynamic stats calculation
+  double _avgCycleLength = 28.0;
+  double _avgPeriodDuration = 5.0;
+  int _cyclesTrackedCount = 0;
+
+  // Calendar month views
+  DateTime _currentMonthView = DateTime.now();
+  DateTime? _selectedCalendarDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCalendarDate = DateTime.now();
+    _loadMetrics();
+  }
+
+  void _loadMetrics() {
+    _db.init().then((_) {
+      if (mounted) {
+        setState(() {
+          _regressionResults = _db.performRidgeRegression();
+          _habitMetrics = _db.calculateHabitMetrics();
+          _resilienceRoadmap = _db.findResilienceRoadmap();
+          _calculateCycleStats();
+          _isLoading = false;
+        });
+      }
+    });
+  }
+
+  void _calculateCycleStats() {
+    final logs = List<PhysicalLog>.from(widget.physicalLogs)
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    final List<List<DateTime>> streaks = [];
+    List<DateTime> currentStreak = [];
+
+    for (final log in logs) {
+      if (log.isPeriodDay) {
+        if (currentStreak.isEmpty) {
+          currentStreak.add(log.date);
+        } else {
+          final diff = log.date.difference(currentStreak.last).inDays;
+          if (diff <= 1.5) {
+            currentStreak.add(log.date);
+          } else {
+            streaks.add(currentStreak);
+            currentStreak = [log.date];
+          }
+        }
+      }
+    }
+    if (currentStreak.isNotEmpty) {
+      streaks.add(currentStreak);
+    }
+
+    if (streaks.length >= 2) {
+      double sumDuration = 0.0;
+      for (final streak in streaks) {
+        sumDuration += streak.length;
+      }
+      _avgPeriodDuration = sumDuration / streaks.length;
+
+      double sumCycle = 0.0;
+      int gapCount = 0;
+      for (int i = 0; i < streaks.length - 1; i++) {
+        final startCurrent = streaks[i].first;
+        final startNext = streaks[i + 1].first;
+        sumCycle += startNext.difference(startCurrent).inDays;
+        gapCount++;
+      }
+      if (gapCount > 0) {
+        _avgCycleLength = sumCycle / gapCount;
+      }
+      _cyclesTrackedCount = streaks.length;
+    }
+  }
+
+  Set<String> _getPredictedPeriodDates() {
+    final Set<String> predicted = {};
+    DateTime? lastPeriodStart;
+    
+    final sortedLogs = List<PhysicalLog>.from(widget.physicalLogs)
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    for (int i = sortedLogs.length - 1; i >= 0; i--) {
+      if (sortedLogs[i].isPeriodDay) {
+        DateTime start = sortedLogs[i].date;
+        int j = i;
+        while (j > 0 && sortedLogs[j - 1].isPeriodDay && 
+               sortedLogs[j].date.difference(sortedLogs[j - 1].date).inDays <= 1) {
+          start = sortedLogs[j - 1].date;
+          j--;
+        }
+        lastPeriodStart = start;
+        break;
+      }
+    }
+
+    if (lastPeriodStart != null) {
+      final int cycleLength = _avgCycleLength.round();
+      final int duration = _avgPeriodDuration.round();
+      for (int cycle = 1; cycle <= 3; cycle++) {
+        final projectedStart = lastPeriodStart.add(Duration(days: cycle * cycleLength));
+        for (int offset = 0; offset < duration; offset++) {
+          final pDay = projectedStart.add(Duration(days: offset));
+          predicted.add("${pDay.year}-${pDay.month}-${pDay.day}");
+        }
+      }
+    }
+    return predicted;
+  }
+
+  int _calculateCycleDay(DateTime date) {
+    DateTime? lastPeriodStart;
+    final sortedLogs = List<PhysicalLog>.from(widget.physicalLogs)
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    for (int i = sortedLogs.length - 1; i >= 0; i--) {
+      if (sortedLogs[i].isPeriodDay && sortedLogs[i].date.isBefore(date.add(const Duration(days: 1)))) {
+        DateTime start = sortedLogs[i].date;
+        int j = i;
+        while (j > 0 && sortedLogs[j - 1].isPeriodDay && 
+               sortedLogs[j].date.difference(sortedLogs[j - 1].date).inDays <= 1) {
+          start = sortedLogs[j - 1].date;
+          j--;
+        }
+        lastPeriodStart = start;
+        break;
+      }
+    }
+
+    if (lastPeriodStart == null) {
+      return 1;
+    }
+
+    final diffDays = date.difference(lastPeriodStart).inDays;
+    final int cycleLengthInt = _avgCycleLength.round();
+    final cycleDay = (diffDays % cycleLengthInt) + 1;
+    return cycleDay;
+  }
+
+  String _getCyclePhaseName(int cycleDay) {
+    if (cycleDay >= 1 && cycleDay <= 5) return 'Menses';
+    if (cycleDay >= 6 && cycleDay <= 13) return 'Follicular';
+    if (cycleDay == 14) return 'Ovulatory';
+    return 'Luteal';
+  }
+
+  String _getMonthName(int month) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[month - 1];
+  }
+
+  List<DateTime> _generateMonthDays(DateTime monthDate) {
+    final firstDayOfMonth = DateTime(monthDate.year, monthDate.month, 1);
+    final lastDayOfMonth = DateTime(monthDate.year, monthDate.month + 1, 0);
+    
+    int startOffset = firstDayOfMonth.weekday - 1;
+    
+    final List<DateTime> days = [];
+    for (int i = startOffset; i > 0; i--) {
+      days.add(firstDayOfMonth.subtract(Duration(days: i)));
+    }
+    for (int i = 1; i <= lastDayOfMonth.day; i++) {
+      days.add(DateTime(monthDate.year, monthDate.month, i));
+    }
+    
+    final totalCells = ((days.length / 7).ceil() * 7);
+    final nextMonthPad = totalCells - days.length;
+    for (int i = 1; i <= nextMonthPad; i++) {
+      days.add(lastDayOfMonth.add(Duration(days: i)));
+    }
+    return days;
+  }
+
+  Widget _buildCycleForecastingCard(bool isDark, Color cardBg, Color textColor) {
+    if (widget.physicalLogs.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(24)),
+        child: const Center(child: Text("No physical logs available for cycle tracking.", style: TextStyle(color: Colors.grey))),
+      );
+    }
+
+    final now = DateTime.now();
+    final todayTruncated = DateTime(now.year, now.month, now.day);
+    
+    final days = _generateMonthDays(_currentMonthView);
+    final predictedPeriods = _getPredictedPeriodDates();
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.teal.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. Centered Month Navigation
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  setState(() {
+                    _currentMonthView = DateTime(_currentMonthView.year, _currentMonthView.month - 1, 1);
+                  });
+                },
+              ),
+              const SizedBox(width: 16),
+              Text(
+                "${_getMonthName(_currentMonthView.month)} ${_currentMonthView.year}",
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+              ),
+              const SizedBox(width: 16),
+              IconButton(
+                icon: const Icon(Icons.chevron_right, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  setState(() {
+                    _currentMonthView = DateTime(_currentMonthView.year, _currentMonthView.month + 1, 1);
+                  });
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Centered Subtitle Stats Tracker
+          Center(
+            child: Text(
+              _cyclesTrackedCount >= 2 
+                  ? "Personalized predictions based on $_cyclesTrackedCount tracked cycles"
+                  : "Predictions based on clinical average 28d cycle",
+              style: const TextStyle(fontSize: 9.5, color: Colors.grey, fontWeight: FontWeight.w500),
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day) {
+              return SizedBox(
+                width: 32,
+                child: Center(
+                  child: Text(
+                    day,
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+              childAspectRatio: 1.0,
+            ),
+            itemCount: days.length,
+            itemBuilder: (context, idx) {
+              final date = days[idx];
+              final dateKey = "${date.year}-${date.month}-${date.day}";
+              final isFuture = date.isAfter(todayTruncated);
+              final isToday = date.isAtSameMomentAs(todayTruncated);
+              final isSelected = _selectedCalendarDate != null && 
+                                 _selectedCalendarDate!.year == date.year && 
+                                 _selectedCalendarDate!.month == date.month && 
+                                 _selectedCalendarDate!.day == date.day;
+              
+              final isCurrentMonth = date.month == _currentMonthView.month;
+
+              final physicalLog = widget.physicalLogs.firstWhere(
+                (p) => p.date.year == date.year && p.date.month == date.month && p.date.day == date.day,
+                orElse: () => PhysicalLog(date: date, sleepHours: 7.5, isPeriodDay: false, skippedMeal: false, lateCaffeine: false),
+              );
+
+              final isPeriodDay = isFuture 
+                  ? predictedPeriods.contains(dateKey)
+                  : physicalLog.isPeriodDay;
+
+              final cycleDay = _calculateCycleDay(date);
+              final phase = _getCyclePhaseName(cycleDay);
+
+              Color phaseColor;
+              switch (phase) {
+                case 'Menses':
+                  phaseColor = const Color(0xFFE11D48);
+                  break;
+                case 'Follicular':
+                  phaseColor = const Color(0xFFFDA4AF);
+                  break;
+                case 'Ovulatory':
+                  phaseColor = const Color(0xFFF43F5E);
+                  break;
+                default:
+                  phaseColor = const Color(0xFFFECDD3);
+              }
+
+              Color cellBg;
+              Border border;
+              Color dayTextColor = isToday ? Colors.teal : (isDark ? Colors.white70 : Colors.black87);
+
+              if (isPeriodDay) {
+                if (isFuture) {
+                  cellBg = const Color(0xFFE11D48).withOpacity(0.1);
+                  border = Border.all(color: const Color(0xFFE11D48).withOpacity(0.6), width: 1.5);
+                } else {
+                  cellBg = const Color(0xFFE11D48);
+                  dayTextColor = Colors.white;
+                  border = Border.all(color: Colors.transparent);
+                }
+              } else {
+                cellBg = Colors.transparent;
+                if (isToday) {
+                  border = Border.all(color: Colors.teal.withOpacity(0.5), width: 1.5);
+                } else {
+                  border = Border.all(color: isCurrentMonth ? Colors.grey.withOpacity(0.08) : Colors.transparent, width: 0.5);
+                }
+              }
+
+              if (isSelected) {
+                border = Border.all(color: Colors.teal, width: 2.0);
+              }
+
+              double opacity = isCurrentMonth ? (isFuture ? 0.65 : 1.0) : 0.25;
+
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedCalendarDate = date;
+                  });
+                },
+                child: Opacity(
+                  opacity: opacity,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: cellBg,
+                      shape: BoxShape.circle,
+                      border: border,
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Text(
+                            "${date.day}",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.normal,
+                              color: dayTextColor,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 4,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: Container(
+                              width: 3.5,
+                              height: 3.5,
+                              decoration: BoxDecoration(
+                                color: phaseColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
+          _buildForecastLegend(isDark),
+
+          _buildSelectedDayDetailsCard(isDark, cardBg),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedDayDetailsCard(bool isDark, Color cardBg) {
+    if (_selectedCalendarDate == null) return const SizedBox.shrink();
+    
+    final date = _selectedCalendarDate!;
+    final now = DateTime.now();
+    final todayTruncated = DateTime(now.year, now.month, now.day);
+    final isFuture = date.isAfter(todayTruncated);
+    
+    final cycleDay = _calculateCycleDay(date);
+    final phase = _getCyclePhaseName(cycleDay);
+    
+    final physicalLog = widget.physicalLogs.firstWhere(
+      (p) => p.date.year == date.year && p.date.month == date.month && p.date.day == date.day,
+      orElse: () => PhysicalLog(date: date, sleepHours: 7.5, isPeriodDay: false, skippedMeal: false, lateCaffeine: false),
+    );
+    
+    final isPeriod = isFuture 
+        ? _getPredictedPeriodDates().contains("${date.year}-${date.month}-${date.day}")
+        : physicalLog.isPeriodDay;
+
+    String phaseDescription = '';
+    switch (phase) {
+      case 'Menses':
+        phaseDescription = "Your progesterone and estrogen levels are at their lowest. Focus on rest, warm hydration, and light stretching. Be extra gentle with yourself.";
+        break;
+      case 'Follicular':
+        phaseDescription = "Estrogen levels begin to rise, boosting your physical energy, mental clarity, and social confidence. Great time for starting new projects.";
+        break;
+      case 'Ovulatory':
+        phaseDescription = "Estrogen peaks, triggering egg release. Fertility, skin radiance, and communication skills are at their natural cycle peak.";
+        break;
+      default: // Luteal
+        phaseDescription = "Progesterone dominates. Energy may decrease, and pre-menstrual physical/emotional symptoms can surface. Prioritize self-care and quiet routines.";
+    }
+
+    String periodText = "Cycle Day $cycleDay";
+    if (isPeriod) {
+      periodText = isFuture ? "Predicted Period" : "Period Logged";
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.teal.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "${date.day} ${_getMonthName(date.month)} ${date.year}",
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isPeriod ? const Color(0xFFE11D48).withOpacity(0.15) : Colors.teal.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  periodText,
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.bold,
+                    color: isPeriod ? const Color(0xFFE11D48) : Colors.teal,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(color: Colors.pinkAccent, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                "Phase: $phase",
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            phaseDescription,
+            style: const TextStyle(fontSize: 10, color: Colors.grey, height: 1.35),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildForecastLegend(bool isDark) {
+    Widget legendChip(Widget indicator, String text) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          indicator,
+          const SizedBox(width: 4),
+          Text(text, style: const TextStyle(fontSize: 9, color: Colors.grey)),
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        legendChip(
+          Container(
+            width: 12,
+            height: 12,
+            decoration: const BoxDecoration(
+              color: Color(0xFFE11D48),
+              shape: BoxShape.circle,
+            ),
+          ),
+          "Period",
+        ),
+        legendChip(
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE11D48).withOpacity(0.1),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFE11D48).withOpacity(0.6), width: 1.2),
+            ),
+          ),
+          "Predicted",
+        ),
+        legendChip(
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.teal, width: 2.0),
+            ),
+          ),
+          "Selected",
+        ),
+        legendChip(
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.teal.withOpacity(0.5), width: 1.5),
+            ),
+          ),
+          "Today",
+        ),
+      ],
     );
   }
 }

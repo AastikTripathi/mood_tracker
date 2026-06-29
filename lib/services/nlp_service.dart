@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:tflite_flutter/tflite_flutter.dart';
+import '../models/thought.dart';
 
 class NlpAnalysis {
   final List<double> vector;
@@ -19,6 +20,72 @@ class NlpService {
   final Map<String, int> _vocab = {};
   int _unkId = 100;
   bool _isModelLoaded = false;
+
+  bool get isModelLoaded => _isModelLoaded;
+  Map<String, int> get vocab => _vocab;
+
+  Map<String, dynamic> getDiagnosticTokenization(String text) {
+    final cleanText = text.toLowerCase().replaceAll(RegExp(r"[.,\/#!$%\^&\*;:{}=\-_`~()]"), " ");
+    final words = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final List<int> inputIds = [];
+    final List<String> tokenStrings = [];
+
+    if (_vocab.containsKey('[CLS]')) {
+      inputIds.add(_vocab['[CLS]']!);
+      tokenStrings.add('[CLS]');
+    }
+
+    for (final word in words) {
+      int start = 0;
+      bool isBad = false;
+      final List<int> subwordIds = [];
+      final List<String> subwords = [];
+
+      while (start < word.length) {
+        int end = word.length;
+        int matchedId = -1;
+        String matchedStr = "";
+
+        while (start < end) {
+          String substr = word.substring(start, end);
+          if (start > 0) substr = "##$substr";
+
+          if (_vocab.containsKey(substr)) {
+            matchedId = _vocab[substr]!;
+            matchedStr = substr;
+            break;
+          }
+          end--;
+        }
+
+        if (matchedId == -1) {
+          isBad = true;
+          break;
+        }
+        subwordIds.add(matchedId);
+        subwords.add(matchedStr);
+        start = end;
+      }
+
+      if (isBad) {
+        inputIds.add(_unkId);
+        tokenStrings.add('[UNK]');
+      } else {
+        inputIds.addAll(subwordIds);
+        tokenStrings.addAll(subwords);
+      }
+    }
+
+    if (_vocab.containsKey('[SEP]')) {
+      inputIds.add(_vocab['[SEP]']!);
+      tokenStrings.add('[SEP]');
+    }
+    return {
+      'tokens': tokenStrings,
+      'ids': inputIds,
+    };
+  }
+
 
   /// Loads the 30k vocabulary asset file and initializes the C++ TFLite engine bindings
   Future<void> initialize() async {
@@ -41,9 +108,15 @@ class NlpService {
       _unkId = _vocab['[UNK]'] ?? 100;
 
       // Initialize interpreter with the quantized model asset
-      _interpreter = await Interpreter.fromAsset('all-MiniLM-L6-v2-quant.tflite');
+      _interpreter = await Interpreter.fromAsset('assets/all-MiniLM-L6-v2-quant.tflite');
       _isModelLoaded = true;
       print("NLP SETUP: On-device Transformer engine successfully booted.");
+      try {
+        final tensors = _interpreter!.getInputTensors();
+        print("TFLITE TENSORS: ${tensors.map((t) => "${t.name} (type: ${t.type}, shape: ${t.shape})").toList()}");
+      } catch (ex) {
+        print("TFLITE TENSOR LOGGING FAILED: $ex");
+      }
     } catch (e) {
       print("CRITICAL ERROR: Failed to load on-device ML system: $e");
     }
@@ -96,10 +169,15 @@ class NlpService {
     return inputIds;
   }
 
-  /// Runs hardware inference on text to return a 384D coordinate vector array
-  NlpAnalysis analyze(String text) {
-    if (!_isModelLoaded || text.trim().isEmpty) {
-      return NlpAnalysis(vector: List.filled(384, 0.0), suggestedTags: []);
+  /// Runs hardware inference or fallback vectorizer to return a 384D coordinate vector array.
+  /// This is a low-level helper that has no dependencies on tag extraction or emotion scoring.
+  List<double> _getVector(String text) {
+    if (text.trim().isEmpty) {
+      return List.filled(384, 0.0);
+    }
+
+    if (!_isModelLoaded) {
+      return _generateFallbackVector(text);
     }
 
     try {
@@ -107,36 +185,84 @@ class NlpService {
       final int seqLen = inputIds.length;
       final List<int> attentionMask = List.filled(seqLen, 1);
 
-      // Dynamic Allocation: Resize model input gates to match exact token size
-      _interpreter!.resizeInputTensor(0, [1, seqLen]); // Gate 0: Attention Mask
-      _interpreter!.resizeInputTensor(1, [1, seqLen]); // Gate 1: Token IDs
+      _interpreter!.resizeInputTensor(0, [1, seqLen]); // Index 0 is input_ids
+      _interpreter!.resizeInputTensor(1, [1, seqLen]); // Index 1 is attention_mask
       _interpreter!.allocateTensors();
 
       final List<Object> inputs = [
-        [attentionMask],
-        [inputIds],
+        [inputIds],      // Index 0: token ids
+        [attentionMask], // Index 1: attention mask
       ];
 
       final Map<int, Object> outputs = {
         0: List.generate(1, (_) => List<double>.filled(384, 0.0)),
       };
 
-      // Execute matrix computations via hardware layer
       _interpreter!.runForMultipleInputs(inputs, outputs);
-
-      final List<double> finalVector = (outputs[0] as List<List<double>>).first;
-      final derivedTags = _extractTagsFromVector(finalVector);
-
-      return NlpAnalysis(vector: finalVector, suggestedTags: derivedTags);
+      return (outputs[0] as List<List<double>>).first;
     } catch (e) {
       print("Error running on-device inference: $e");
+      return _generateFallbackVector(text);
+    }
+  }
+
+  /// Runs hardware inference on text to return a 384D coordinate vector array
+  NlpAnalysis analyze(String text) {
+    if (text.trim().isEmpty) {
       return NlpAnalysis(vector: List.filled(384, 0.0), suggestedTags: []);
     }
+
+    final vector = _getVector(text);
+    final bool isModelFailed = !_isModelLoaded;
+
+    // Dynamic semantic extraction of emotion/sentiment from the note
+    final emotionScores = getEmotionScores(text, vector);
+    final derivedTags = <String>[];
+    emotionScores.forEach((emotion, score) {
+      final double threshold = isModelFailed ? 0.05 : 0.20;
+      if (score >= threshold) {
+        derivedTags.add(emotion);
+      }
+    });
+
+    return NlpAnalysis(vector: vector, suggestedTags: derivedTags);
+  }
+
+  /// Generates a fallback 384D pseudo-embedding vector when the ML model is unloaded.
+  /// Uses a term-frequency hashing trick normalized to unit length.
+  List<double> _generateFallbackVector(String text) {
+    final List<double> vector = List.filled(384, 0.0);
+    final cleanText = text.toLowerCase().replaceAll(RegExp(r"[.,\/#!$%\^&\*;:{}=\-_`~()]"), " ");
+    final words = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+
+    if (words.isEmpty) return vector;
+
+    for (final word in words) {
+      int hash = 0;
+      for (int i = 0; i < word.length; i++) {
+        hash = (hash * 31 + word.codeUnitAt(i)) & 0xFFFFFFFF;
+      }
+      final int index = hash.abs() % 384;
+      vector[index] += 1.0;
+    }
+
+    double sumSq = 0.0;
+    for (final val in vector) {
+      sumSq += val * val;
+    }
+    if (sumSq > 0) {
+      final double norm = math.sqrt(sumSq);
+      for (int i = 0; i < vector.length; i++) {
+        vector[i] /= norm;
+      }
+    }
+
+    return vector;
   }
 
   /// Runs vectorization on text and returns the raw 384D coordinate vector array
   List<double> vectorize(String text) {
-    return analyze(text).vector;
+    return _getVector(text);
   }
 
   /// Computes spatial alignment between two 384D arrays
@@ -156,36 +282,125 @@ class NlpService {
     return dotProduct / (math.sqrt(mag1) * math.sqrt(mag2));
   }
 
-  List<String> _extractTagsFromVector(List<double> vector) {
-    final List<String> tags = [];
-    // Basic structural anchors using high-signal vector boundaries 
-    if (vector[10].abs() > 0.08) tags.add("Focus");
-    if (vector[250].abs() > 0.08) tags.add("Calm");
-    return tags;
-  }
+  // Pre-defined semantic profile descriptions for dynamic zero-shot emotion matching
+  static const Map<String, String> emotionProfiles = {
+    'Stress': 'anxious stressed worried overwhelmed nervous tense concerned',
+    'Calm': 'calm peaceful relaxed serene quiet tranquil mindful',
+    'Energy': 'tired exhausted sleepy fatigued low energy weary',
+    'Focus': 'focused concentrated productive hard working studying tasks',
+    'Joy': 'happy cheerful joyful excited glad positive content',
+    'Sadness': 'sad down depressed lonely gloomy sorrowful',
+    'Gratitude': 'grateful thankful appreciated blessed happy positive hopeful optimistic motivated',
+    'Frustration': 'frustrated angry annoyed irritated mad furious upset',
+    'Discomfort': 'foggy groggy dizzy nauseous sick hurt headache pain tired fatigued',
+  };
 
-  /// Extracts categories from text. This preserves the original app category list
-  /// but can also be augmented by vector tags or keep the existing robust keyword parsing.
-  List<String> extractCategories(String text) {
-    final clean = text.toLowerCase();
-    List<String> results = [];
+  // Cache compiled vector profiles to minimize redundant inferences
+  final Map<String, List<double>> _cachedProfileVectors = {};
 
-    if (clean.contains('work') || clean.contains('task') || clean.contains('deadline')) {
-      results.add('Work');
+  /// Calculates semantic similarity of input text compared to emotion profile definitions.
+  /// Evaluates sub-clauses separately to isolate mixed sentiments and combines scores via max-pooling.
+  Map<String, double> getEmotionScores(String text, [List<double>? textVector]) {
+    if (text.trim().isEmpty) return {};
+
+    final Map<String, double> scores = {};
+    for (final emotion in emotionProfiles.keys) {
+      scores[emotion] = 0.0;
     }
-    if (clean.contains('anxious') || clean.contains('stressed') || clean.contains('overwhelmed')) {
-      if (!clean.contains('not stressed') && !clean.contains('not anxious') && !clean.contains('dont feel anxious')) {
-        results.add('Stress');
+
+    final bool isModelFailed = !_isModelLoaded;
+
+    // Split text into clauses by common conjunctions and punctuation
+    final RegExp splitReg = RegExp(r"[,.;!?]|\b(but|yet|however|although|whereas|though)\b", caseSensitive: false);
+    final List<String> clauses = text.split(splitReg)
+        .map((c) => c.trim())
+        .where((c) => c.isNotEmpty && c.split(RegExp(r'\s+')).length >= 2) // only analyze clauses with 2+ words
+        .toList();
+
+    // Fall back to whole text if no valid sub-clauses are extracted
+    if (clauses.isEmpty) {
+      clauses.add(text.trim());
+    }
+
+    for (final clause in clauses) {
+      if (isModelFailed) {
+        emotionProfiles.forEach((emotion, profileText) {
+          final sim = _calculateTextJaccard(clause, profileText);
+          scores[emotion] = math.max(scores[emotion]!, sim);
+        });
+      } else {
+        final clauseVector = _getVector(clause);
+        emotionProfiles.forEach((emotion, profileText) {
+          final profileVector = _cachedProfileVectors.putIfAbsent(
+            emotion,
+            () => _getVector(profileText),
+          );
+          final sim = calculateSimilarity(clauseVector, profileVector);
+          scores[emotion] = math.max(scores[emotion]!, sim); // Max pooling
+        });
       }
     }
-    if (clean.contains('tired') || clean.contains('sleep') || clean.contains('exhausted')) {
-      results.add('Energy');
-    }
-    if (clean.contains('walk') || clean.contains('nature') || clean.contains('garden') || clean.contains('sun')) {
-      results.add('Nature');
+
+    return scores;
+  }
+
+  /// Calculates scoring weights for all candidate tags from historical thoughts.
+  Map<String, double> getTagScores(String text, [List<Thought>? history]) {
+    if (history == null || history.isEmpty) {
+      return {};
     }
 
-    // Add suggestions from model if available
+    final currentVector = vectorize(text);
+    final bool isModelFailed = !_isModelLoaded; // Correctly check if TFLite model is unloaded
+    final Map<String, double> tagScores = {};
+
+    for (var thought in history) {
+      double similarity = 0.0;
+      if (isModelFailed) {
+        // Fallback to Jaccard word-overlap similarity if ML model is unloaded
+        similarity = _calculateTextJaccard(text, thought.textContent);
+      } else {
+        final pastVector = thought.embedding ?? vectorize(thought.textContent);
+        similarity = calculateSimilarity(currentVector, pastVector);
+      }
+
+      // Use a lower threshold (0.05) for Jaccard overlap so single-word matches are captured, and 0.35 for dense ML vectors
+      final double threshold = isModelFailed ? 0.05 : 0.35;
+      if (similarity > threshold) {
+        final weight = similarity; // Scale weight by similarity
+        
+        // Aggregate all categories and userTags
+        final allTags = <String>{...thought.categories, ...thought.userTags};
+        for (final tag in allTags) {
+          if (tag == 'Reflection') continue; // Skip default tag to encourage learning specific tags
+          tagScores[tag] = (tagScores[tag] ?? 0.0) + weight;
+        }
+      }
+    }
+    return tagScores;
+  }
+
+  /// Extracts categories from text dynamically by mining user's tagging patterns
+  /// from historical thoughts using semantic similarity.
+  List<String> extractCategories(String text, [List<Thought>? history]) {
+    if (history == null || history.isEmpty) {
+      // Fallback if no history exists: extract from vector anchors and default to Reflection if empty
+      final analysis = analyze(text);
+      final results = List<String>.from(analysis.suggestedTags);
+      if (results.isEmpty) results.add('Reflection');
+      return results;
+    }
+
+    final Map<String, double> tagScores = getTagScores(text, history);
+
+    // Sort tags by accumulated score descending
+    final sortedTags = tagScores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // Take the top recommended tags
+    final results = sortedTags.map((e) => e.key).take(3).toList();
+    
+    // Add model-derived spatial tags (e.g. Focus, Calm) if they match the current vector
     final analysis = analyze(text);
     for (var tag in analysis.suggestedTags) {
       if (!results.contains(tag)) {
@@ -193,7 +408,27 @@ class NlpService {
       }
     }
 
-    if (results.isEmpty) results.add('Reflection');
+    if (results.isEmpty) {
+      results.add('Reflection');
+    }
+
     return results;
+  }
+
+  /// Public Jaccard similarity utility wrapper for testing/diagnostics
+  double calculateJaccard(String s1, String s2) {
+    return _calculateTextJaccard(s1, s2);
+  }
+
+  /// Simple Jaccard similarity utility for text fallback
+  double _calculateTextJaccard(String s1, String s2) {
+    final clean1 = s1.toLowerCase().replaceAll(RegExp(r"[.,\/#!$%\^&\*;:{}=\-_`~()]"), " ");
+    final clean2 = s2.toLowerCase().replaceAll(RegExp(r"[.,\/#!$%\^&\*;:{}=\-_`~()]"), " ");
+    final set1 = clean1.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    final set2 = clean2.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    if (set1.isEmpty && set2.isEmpty) return 1.0;
+    final intersection = set1.intersection(set2).length;
+    final union = set1.union(set2).length;
+    return intersection / union;
   }
 }

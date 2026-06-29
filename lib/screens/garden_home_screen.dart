@@ -11,6 +11,7 @@ import '../services/database_service.dart';
 import '../widgets/habit_tracker_card.dart';
 import '../widgets/cozy_almanac_card.dart';
 import 'detailed_analytics_screen.dart';
+import 'developer_view_screen.dart';
 import 'journal_entry_screen.dart';
 import 'journal_history_screen.dart';
 import 'navigation_shell.dart';
@@ -435,6 +436,24 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
             child: Row(
               children: [
                 IconButton(
+                  icon: const Icon(Icons.terminal_rounded, size: 28, color: Colors.teal),
+                  tooltip: "Dev Diagnostics",
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DeveloperViewScreen(
+                          historyThoughts: _historyThoughts,
+                          availableHabits: _availableHabits,
+                          allHabitLogs: _allHabitLogs,
+                          physicalLogs: _db.getPhysicalLogs(),
+                          isTwilight: _isTwilight,
+                        ),
+                      ),
+                    ).then((_) => _syncStateFromDatabase());
+                  },
+                ),
+                IconButton(
                   icon: const Icon(Icons.local_florist, size: 28, color: Colors.teal),
                   onPressed: _showPlantSelectorDialog,
                 ),
@@ -796,7 +815,35 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
             "Simulator Sandbox Dashboard (Testing Controls)",
             style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, letterSpacing: 0.5, color: _isTwilight ? Colors.white38 : Colors.teal.shade800),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.maxFinite,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DeveloperViewScreen(
+                      historyThoughts: _historyThoughts,
+                      availableHabits: _availableHabits,
+                      allHabitLogs: _allHabitLogs,
+                      physicalLogs: _db.getPhysicalLogs(),
+                      isTwilight: _isTwilight,
+                    ),
+                  ),
+                ).then((_) => _syncStateFromDatabase());
+              },
+              icon: const Icon(Icons.terminal_rounded, size: 14, color: Colors.white),
+              label: const Text("Open Engine Diagnostics Console", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal.shade500,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -820,112 +867,319 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                 child: OutlinedButton.icon(
                   onPressed: () async {
                     final List<Map<String, dynamic>> seedReflections = [
-                      // High Mood / Calm / Active (Mood 8, 9, 10)
+                      // High Mood / Calm / Active (Mood 8, 9, 10) - 15 unique items
                       {
                         'mood': 9,
-                        'text': "A beautiful sunlit morning! Spent two hours tending to the lavender patches and potting new seedlings. The garden feels alive today.",
-                        'categories': ['Nature', 'Cozy', 'Grateful']
+                        'text': "A beautiful sunlit morning! Spent two hours tending to the lavender patches and potting new seedlings. The garden feels so calm, peaceful, and relaxed.",
+                        'categories': ['Calm', 'Nature', 'Cozy']
                       },
                       {
                         'mood': 8,
-                        'text': "Woke up early and walked through the nearby park. The crisp morning air completely cleared my head. Feeling grounded and ready.",
-                        'categories': ['Nature', 'Grounded']
+                        'text': "Woke up early and walked through the nearby pine forest. Feeling so grateful and positive about this day. I am hopeful and highly motivated.",
+                        'categories': ['Gratitude', 'Nature']
                       },
                       {
                         'mood': 9,
-                        'text': "Cooked a wonderful dinner with fresh herbs from the window sill. Had a peaceful evening reading my new book by the window.",
-                        'categories': ['Cozy', 'Grateful', 'Reflection']
+                        'text': "Cooked a wonderful dinner with fresh rosemary from the windowsill. Had a peaceful evening reading my book by the window. Happy, cozy, and full of joy.",
+                        'categories': ['Joy', 'Cozy', 'Calm']
                       },
                       {
                         'mood': 8,
-                        'text': "Finished a light jog in the afternoon. My energy levels are surprisingly high, and my body feels strong and flexible today.",
-                        'categories': ['Grounded', 'Nature']
+                        'text': "Finished a light jog in the park. My energy levels are surprisingly high today, and my body feels strong and flexible.",
+                        'categories': ['Calm', 'Nature']
                       },
                       {
                         'mood': 10,
-                        'text': "An absolutely perfect day. Everything felt flowing and peaceful. Sat in the sun for an hour doing nothing but listening to the birds.",
-                        'categories': ['Cozy', 'Grateful', 'Reflection']
+                        'text': "An absolutely perfect day. Everything felt flowing and peaceful. Extremely happy and joyful listening to the birds in the garden.",
+                        'categories': ['Joy', 'Cozy', 'Gratitude']
                       },
                       {
                         'mood': 8,
-                        'text': "Quiet evening. Made a hot cup of chamomile tea, put on some ambient music, and spent time sketching. A solid, restful day.",
-                        'categories': ['Cozy', 'Grounded']
+                        'text': "Quiet evening. Made a hot cup of chamomile tea, put on ambient music, and spent time sketching. Restful, cozy, and peaceful.",
+                        'categories': ['Calm', 'Cozy']
                       },
                       {
                         'mood': 9,
-                        'text': "Accomplished all my study goals today without feeling rushed or anxious. The pace of my day felt completely under my control.",
-                        'categories': ['Grounded', 'Reflection']
+                        'text': "Accomplished all my study goals today without feeling rushed. I was completely focused and concentrated on my productive work tasks.",
+                        'categories': ['Focus', 'Gratitude']
                       },
-                      // Medium Mood / Balanced (Mood 5, 6, 7)
+                      {
+                        'mood': 8,
+                        'text': "Woke up feeling refreshed after a deep sleep. Had a great morning coffee and resolved a complex coding problem. Feeling very motivated.",
+                        'categories': ['Focus', 'Joy']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Lovely afternoon picnic in the botanical garden. The flowers are blooming beautifully. Felt a strong connection to nature and peace.",
+                        'categories': ['Nature', 'Calm']
+                      },
+                      {
+                        'mood': 10,
+                        'text': "Had a hearty laugh with a close friend today. Grateful for supportive people in my life. The conversation lifted my mood significantly.",
+                        'categories': ['Joy', 'Gratitude']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Organized my workspace and planned the upcoming week. The clarity of having a clean desk makes me feel focused and productive.",
+                        'categories': ['Focus', 'Calm']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Spent the evening watching the sunset from the balcony. The sky was filled with vibrant colors. Feeling calm and appreciative.",
+                        'categories': ['Nature', 'Calm', 'Gratitude']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Baked a fresh loaf of sourdough bread today. The house smells amazing. Enjoying the slow, cozy process of baking.",
+                        'categories': ['Cozy', 'Joy']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Had a very productive brainstorming session. Ideas are flowing easily, and I feel excited to start working on these new projects.",
+                        'categories': ['Focus', 'Joy']
+                      },
+                      {
+                        'mood': 10,
+                        'text': "A quiet, mindful day. Practiced meditation and yoga in the morning. Felt completely grounded, peaceful, and connected.",
+                        'categories': ['Calm', 'Gratitude']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Visited the local farmer's market today. Bought fresh organic honey and wild berries. Loving the vibrant colors and friendly atmosphere.",
+                        'categories': ['Calm', 'Nature', 'Joy']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Woke up at dawn and watched the morning fog clear over the hills. The silence was absolutely beautiful and meditative.",
+                        'categories': ['Calm', 'Nature', 'Gratitude']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Had a very productive drawing session this evening. Finally completed the landscape sketch. Feeling accomplished and creative.",
+                        'categories': ['Joy', 'Focus', 'Cozy']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Spent an hour doing light gardening. The soil felt warm, and planting the tomato seeds made me feel happy and grounded.",
+                        'categories': ['Nature', 'Calm', 'Gratitude']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Had an amazing workout session today. Pushed my limits and felt strong. My energy levels are at an all-time high.",
+                        'categories': ['Joy', 'Calm']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Read three chapters of my book in a cozy coffee shop. The warm ambient light and quiet chatter were very soothing.",
+                        'categories': ['Cozy', 'Calm']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Sorted out my inbox and resolved all outstanding tasks. Felt a great sense of relief and focus going into the evening.",
+                        'categories': ['Focus', 'Calm']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Walked along the lake as the sun went down. The water was perfectly still, reflecting the pink clouds. Truly peaceful.",
+                        'categories': ['Nature', 'Calm']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Hosted a small dinner for family. Loved sharing good food and hearing stories. Deeply grateful for family connection.",
+                        'categories': ['Joy', 'Gratitude']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Cleaned my workspace and set up a new planner. Feeling incredibly organized, focused, and ready for future tasks.",
+                        'categories': ['Focus', 'Calm']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Had a wonderful conversation with a mentor today. Got clear guidance on my goals. Feeling inspired and motivated.",
+                        'categories': ['Focus', 'Gratitude']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "Spent a quiet afternoon playing the piano. Music always helps me center myself and feel at peace.",
+                        'categories': ['Calm', 'Cozy']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Woke up feeling enthusiastic. Spent the morning coding a new UI design. The layout looks modern and clean.",
+                        'categories': ['Focus', 'Joy']
+                      },
+                      {
+                        'mood': 8,
+                        'text': "A completely relaxing Sunday. Slept in, made pancakes, and spent the day listening to old vinyl records.",
+                        'categories': ['Cozy', 'Joy']
+                      },
+                      {
+                        'mood': 9,
+                        'text': "Feeling incredibly content with where I am right now. Sitting with a warm cup of coffee and enjoying the present moment.",
+                        'categories': ['Calm', 'Gratitude']
+                      },
+
+                      // Medium Mood / Balanced (Mood 5, 6, 7) - 15 unique items
                       {
                         'mood': 7,
-                        'text': "Spent a quiet afternoon cleaning the apartment and rearranging the bookshelf. A productive but low-key day.",
-                        'categories': ['Grounded', 'Reflection']
+                        'text': "Spent a quiet afternoon cleaning the apartment and rearranging the bookshelf. Focused on organization, feeling balanced and serene.",
+                        'categories': ['Focus', 'Calm']
                       },
                       {
                         'mood': 6,
-                        'text': "Feeling a bit distracted today. Work was busy, but I managed to take a few deep breaths and step outside during my lunch break.",
-                        'categories': ['Grounded', 'Reflection']
+                        'text': "Feeling a bit distracted today. Work was busy, but I managed to step outside for some mindful, quiet breathing during my break.",
+                        'categories': ['Calm', 'Reflection']
                       },
                       {
                         'mood': 5,
-                        'text': "A bit of a mixed bag today. Had a slight headache in the afternoon, but a short nap helped restore my baseline energy.",
-                        'categories': ['Tired', 'Reflection']
+                        'text': "A bit of a mixed bag today. Feeling tired, sleepy, and exhausted in the afternoon with low energy, but a short nap helped.",
+                        'categories': ['Energy', 'Reflection']
                       },
                       {
                         'mood': 6,
-                        'text': "Decent day overall. Met up with a friend for a quick tea. Nice to catch up, though I feel ready for a quiet night in.",
-                        'categories': ['Grounded', 'Cozy']
+                        'text': "Decent day overall. Met up with a classmate for tea. Thankful for the company, though I feel tired and ready for a quiet night.",
+                        'categories': ['Gratitude', 'Cozy']
                       },
                       {
                         'mood': 7,
-                        'text': "The weather was overcast, which matched my mood. Did some journaling and organized my workspace. Feeling balanced.",
-                        'categories': ['Reflection', 'Grounded']
+                        'text': "The weather was overcast. Did some journaling, workspace organization, and quiet self-reflection. Feeling balanced.",
+                        'categories': ['Reflection', 'Calm']
                       },
                       {
                         'mood': 6,
-                        'text': "Tired but content. Got through a heavy task list. Planning to rest early tonight and skip any late screen time.",
-                        'categories': ['Tired', 'Reflection']
-                      },
-                      // Low Mood / Burdened / Crisis (Mood 2, 3, 4)
-                      {
-                        'mood': 3,
-                        'text': "Felt extremely low and drained today. My body feels heavy, and chronic pain is flaring up. Just staying in bed with heat pads.",
-                        'categories': ['Tired', 'Vent']
+                        'text': "Tired but content. Got through a heavy task list. Planning to rest early tonight because my energy levels are low.",
+                        'categories': ['Energy', 'Reflection']
                       },
                       {
+                        'mood': 7,
+                        'text': "Spent the morning running errands. The grocery store was crowded, which was slightly stressful, but now resting quietly at home.",
+                        'categories': ['Stress', 'Calm']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "A balanced day. Did some light reading and helped a neighbor. Nothing exciting happened, but it was peaceful and calm.",
+                        'categories': ['Calm', 'Reflection']
+                      },
+                      {
+                        'mood': 5,
+                        'text': "Slow start to the day. Felt a bit foggy in the morning, but as the sun came out, I felt more grounded and organized.",
+                        'categories': ['Reflection', 'Energy']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "Had a busy workday. Lots of emails to answer, which made me feel slightly overwhelmed, but managed to keep my focus.",
+                        'categories': ['Focus', 'Stress']
+                      },
+                      {
+                        'mood': 7,
+                        'text': "Rainy afternoon. Spent it listening to the rain and organizing my old photos. A reflective, slightly cozy mood.",
+                        'categories': ['Reflection', 'Cozy']
+                      },
+                      {
+                        'mood': 5,
+                        'text': "Felt a bit low on energy today, so I skipped my workout. Instead, did some gentle stretching and went to bed early.",
+                        'categories': ['Energy', 'Calm']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "A standard day. Attended lectures, took notes, and prepared dinner. Feeling okay, just looking forward to the weekend.",
+                        'categories': ['Reflection', 'Focus']
+                      },
+                      {
+                        'mood': 7,
+                        'text': "Cooked a new soup recipe. It turned out okay. Spent the rest of the evening relaxing and chatting with family in a cozy mood.",
+                        'categories': ['Cozy', 'Reflection']
+                      },
+                      {
+                        'mood': 6,
+                        'text': "Woke up with a stiff neck, but a warm shower and some light stretching helped. Had a balanced, quiet day of reading.",
+                        'categories': ['Calm', 'Reflection']
+                      },
+
+                      // Low Mood / Burdened / Crisis (Mood 2, 3, 4) - 15 unique items
+                      {
                         'mood': 3,
-                        'text': "A really challenging day. Had a seizure incident in the morning which left me feeling disoriented and physically exhausted.",
-                        'categories': ['Tired', 'Vent']
+                        'text': "Felt extremely low and drained today. My body feels heavy, and chronic pain is flaring up with deep fatigue and groggy brain fog.",
+                        'categories': ['Discomfort', 'Energy']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "A really challenging day. Had a seizure incident which left me feeling disoriented, frustrated, annoyed, and exhausted.",
+                        'categories': ['Discomfort', 'Frustration']
                       },
                       {
                         'mood': 4,
-                        'text': "Anxious and overwhelmed by work tasks. The deadlines are piling up and my focus is completely shattered. Need to step back.",
-                        'categories': ['Vent', 'Tired']
+                        'text': "Anxious and overwhelmed by work tasks. The stress and deadlines are piling up and my focus is completely shattered.",
+                        'categories': ['Stress', 'Frustration']
                       },
                       {
                         'mood': 2,
-                        'text': "Completely overwhelmed today. The pain levels are making it hard to concentrate on anything. Emotional exhaustion has set in.",
-                        'categories': ['Vent', 'Tired']
+                        'text': "Completely overwhelmed today. The headache pain levels are making it hard to concentrate. High anxiety and stress.",
+                        'categories': ['Discomfort', 'Stress']
                       },
                       {
                         'mood': 3,
-                        'text': "Very quiet, heavy headspace today. Felt isolated and lacked the energy to interact with anyone. Just trying to breathe through it.",
-                        'categories': ['Vent', 'Reflection']
+                        'text': "Very quiet, heavy headspace today. Felt sad, lonely, depressed, and isolated. Lacked the energy to interact.",
+                        'categories': ['Sadness', 'Energy']
                       },
                       {
                         'mood': 4,
-                        'text': "Woke up after a night of restless sleep loss. Everything feels slightly harder to manage when fatigue is this deep.",
-                        'categories': ['Tired', 'Vent']
+                        'text': "Woke up after a night of restless sleep loss. Deep fatigue and groggy brain fog make everything hard to manage.",
+                        'categories': ['Energy', 'Discomfort']
                       },
                       {
                         'mood': 3,
-                        'text': "Struggling with cycle symptoms. Severe cramps and brain fog made it a very unproductive day. Trying not to judge myself.",
-                        'categories': ['Tired', 'Vent']
+                        'text': "Struggling with cycle symptoms. Severe cramps, nausea, and general physical discomfort made it a very unproductive day.",
+                        'categories': ['Discomfort', 'Frustration']
+                      },
+                      {
+                        'mood': 4,
+                        'text': "Had a setback at work today. The feedback was harsh, and I feel annoyed, frustrated, and disappointed in myself.",
+                        'categories': ['Frustration', 'Sadness']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "Feeling very anxious and tense about the upcoming medical checkup. Hard to focus on anything else, mind is racing.",
+                        'categories': ['Stress', 'Sadness']
+                      },
+                      {
+                        'mood': 2,
+                        'text': "A dark, gloomy day. Felt a deep sense of sadness and loneliness. Spent the whole day indoors under the covers.",
+                        'categories': ['Sadness', 'Cozy']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "Woke up with a migraine. The light sensitivity and pain are unbearable. Staying in a dark room all day.",
+                        'categories': ['Discomfort', 'Energy']
+                      },
+                      {
+                        'mood': 4,
+                        'text': "Felt very irritable and frustrated today. Minor things kept annoying me. Need some space to calm down and reset.",
+                        'categories': ['Frustration', 'Stress']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "Exhausted from constant sleep struggles. My body is fatigued, and I feel emotionally sensitive and tearful today.",
+                        'categories': ['Energy', 'Sadness']
+                      },
+                      {
+                        'mood': 4,
+                        'text': "Struggling to keep up with daily tasks. Everything feels like a chore when you are this exhausted and anxious.",
+                        'categories': ['Stress', 'Energy']
+                      },
+                      {
+                        'mood': 3,
+                        'text': "A heavy, unproductive day. Had a minor seizure aura that left me feeling disoriented and anxious for hours.",
+                        'categories': ['Discomfort', 'Stress']
                       }
                     ];
 
+                    await _db.clearData();
                     final now = DateTime.now();
+                    int highIdx = 0;
+                    int medIdx = 0;
+                    int lowIdx = 0;
+
                     for (int i = 45; i >= 1; i--) {
                       final day = now.subtract(Duration(days: i));
                       
@@ -1011,7 +1265,18 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         return m >= 5 && m <= 7;
                       }).toList();
 
-                      final selectedRef = matchingReflections[i % matchingReflections.length];
+                      final Map<String, dynamic> selectedRef;
+                      if (mood <= 4) {
+                        selectedRef = matchingReflections[lowIdx % matchingReflections.length];
+                        lowIdx++;
+                      } else if (mood >= 8) {
+                        selectedRef = matchingReflections[highIdx % matchingReflections.length];
+                        highIdx++;
+                      } else {
+                        selectedRef = matchingReflections[medIdx % matchingReflections.length];
+                        medIdx++;
+                      }
+
                       final text = selectedRef['text'] as String;
                       final categories = List<String>.from(selectedRef['categories'] as List);
                       

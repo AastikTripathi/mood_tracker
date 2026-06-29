@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/thought.dart';
-import 'thought_detail_dialog.dart';
+import 'day_timeline_dialog.dart';
 
 class CozyAlmanacCard extends StatefulWidget {
   final List<Thought> historyThoughts;
@@ -85,19 +85,23 @@ class _CozyAlmanacCardState extends State<CozyAlmanacCard> {
     for (int dayNumber = 1; dayNumber <= daysInMonth; dayNumber++) {
       final targetDate = DateTime(_displayYear, _displayMonth, dayNumber);
 
-      final dayThought = widget.historyThoughts.cast<Thought?>().firstWhere(
-            (t) => t!.timestamp.year == targetDate.year && t.timestamp.month == targetDate.month && t.timestamp.day == targetDate.day,
-        orElse: () => null,
-      );
+      final dayThoughts = widget.historyThoughts.where(
+            (t) => t.timestamp.year == targetDate.year && t.timestamp.month == targetDate.month && t.timestamp.day == targetDate.day,
+      ).toList();
 
-      final bool hasData = dayThought != null;
+      final dayHabits = widget.allHabitLogs.where(
+            (l) => l.occurrenceDate.year == targetDate.year && l.occurrenceDate.month == targetDate.month && l.occurrenceDate.day == targetDate.day,
+      ).toList();
+
+      final bool hasData = dayThoughts.isNotEmpty || dayHabits.isNotEmpty;
       final bool isSelected = widget.selectedDate.year == targetDate.year && 
                              widget.selectedDate.month == targetDate.month && 
                              widget.selectedDate.day == targetDate.day;
 
       Color blockColor = isCardDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03);
-      if (hasData) {
-        final score = dayThought.moodScore;
+      if (dayThoughts.isNotEmpty) {
+        final sum = dayThoughts.map((t) => t.moodScore).reduce((a, b) => a + b);
+        final score = (sum / dayThoughts.length).round();
         if (score <= 2) {
           blockColor = const Color(0xFF3F51B5).withOpacity(isCardDark ? 0.5 : 0.25); // Overwhelmed (Indigo)
         } else if (score <= 4) {
@@ -109,6 +113,8 @@ class _CozyAlmanacCardState extends State<CozyAlmanacCard> {
         } else {
           blockColor = const Color(0xFFFFC107).withOpacity(isCardDark ? 0.8 : 0.55); // Radiant (Gold/Amber)
         }
+      } else if (dayHabits.isNotEmpty) {
+        blockColor = Colors.teal.withOpacity(isCardDark ? 0.15 : 0.08); // Activity only
       }
 
       gridItems.add(
@@ -116,9 +122,9 @@ class _CozyAlmanacCardState extends State<CozyAlmanacCard> {
           onTap: () {
             widget.onDateSelected(targetDate);
             if (hasData) {
-              ThoughtDetailDialog.show(
+              DayTimelineDialog.show(
                 context,
-                thought: dayThought,
+                date: targetDate,
                 allThoughts: widget.historyThoughts,
                 allHabitLogs: widget.allHabitLogs,
                 availableHabits: widget.availableHabits,

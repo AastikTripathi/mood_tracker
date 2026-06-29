@@ -152,22 +152,15 @@ class _JournalEntryScreenState extends State<JournalEntryScreen> {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
 
-    // 1. Query history using semantic vector proximity search (low threshold to rank all entries)
-    final similarThoughts = _db.semanticSearch(text, targetThreshold: 0.10);
-
-    // 2. Gather unique tags & categories from the top 3 most semantically similar past notes
-    final Set<String> historicalSuggestions = {};
-    for (var thought in similarThoughts.take(3)) {
-      historicalSuggestions.addAll(thought.categories);
-      historicalSuggestions.addAll(thought.userTags);
-    }
+    // 1. Query history and extract categories using the unified dynamic learning engine
+    final suggestions = _nlp.extractCategories(text, _db.getThoughts());
 
     // Filter out tags already added by the user or general defaults
-    historicalSuggestions.removeWhere((tag) => _userTags.contains(tag) || tag == 'Reflection');
+    suggestions.removeWhere((tag) => _userTags.contains(tag) || tag == 'Reflection');
 
     setState(() {
-      _autoCategories = historicalSuggestions.toList();
-      _suggestedTags = historicalSuggestions.toList();
+      _autoCategories = suggestions;
+      _suggestedTags = suggestions;
       _isAnalyzed = true;
     });
 

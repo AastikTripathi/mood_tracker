@@ -124,6 +124,14 @@ class DatabaseService {
   List<HabitDefinition> getHabitDefinitions() => _habitDefinitions;
   List<HabitLog> getHabitLogs() => _habitLogs;
 
+  /// Clears all thoughts, physical logs, and habit logs from memory and disk.
+  Future<void> clearData() async {
+    _thoughts.clear();
+    _physicalLogs.clear();
+    _habitLogs.clear();
+    await _saveAllData();
+  }
+
   /// Processes a new journal input, builds its vector footprint, and saves to disk
   Future<void> saveThought(Thought thought) async {
     // Generate the 384D mathematical vector profile exactly once and save it in the object
@@ -166,6 +174,7 @@ class DatabaseService {
       }
     }
 
+    _thoughts.removeWhere((t) => t.id == thought.id);
     _thoughts.add(thought);
     await _saveAllData();
   }
@@ -173,7 +182,7 @@ class DatabaseService {
   /// Instantly scans history using precompiled vector math without reprocessing text
   List<Thought> semanticSearch(String query, {double targetThreshold = 0.35}) {
     final queryVector = _nlp.vectorize(query);
-    final bool isModelFailed = queryVector.every((x) => x == 0.0);
+    final bool isModelFailed = !_nlp.isModelLoaded;
     
     final List<MapEntry<Thought, double>> scoredEntries = [];
 
@@ -208,24 +217,71 @@ class DatabaseService {
     return intersection / union;
   }
 
-  /// Groups historical thought data dynamically into organic mood spaces
+  /// Retrieves the set of habit IDs logged on a specific day.
+  Set<String> getHabitsForDay(DateTime date) {
+    return _habitLogs
+        .where((log) =>
+            log.occurrenceDate.year == date.year &&
+            log.occurrenceDate.month == date.month &&
+            log.occurrenceDate.day == date.day)
+        .map((log) => log.habitId)
+        .toSet();
+  }
+
+  /// Calculates a detailed multi-modal similarity breakdown between two thoughts/days.
+  Map<String, double> getHybridSimilarityBreakdown(Thought a, Thought b) {
+    final double actualMoodDiff = (a.moodScore - b.moodScore).abs().toDouble();
+    final double moodSim = actualMoodDiff <= 1.0 ? 1.0 : 0.0;
+
+    // 2. Semantic Text Similarity (Weight: 0.3)
+    final vectorA = a.embedding ?? _nlp.vectorize(a.textContent);
+    final vectorB = b.embedding ?? _nlp.vectorize(b.textContent);
+    if (a.embedding == null) a.embedding = vectorA;
+    if (b.embedding == null) b.embedding = vectorB;
+    final double semanticSim = _nlp.calculateSimilarity(vectorA, vectorB);
+
+    // 3. Habitual Similarity (Weight: 0.3)
+    final habitsA = getHabitsForDay(a.timestamp);
+    final habitsB = getHabitsForDay(b.timestamp);
+
+    double habitSim = 1.0;
+    if (habitsA.isNotEmpty || habitsB.isNotEmpty) {
+      final intersection = habitsA.intersection(habitsB).length;
+      final union = habitsA.union(habitsB).length;
+      habitSim = intersection / union;
+    }
+
+    final double total = (moodSim * 0.4) + (semanticSim * 0.3) + (habitSim * 0.3);
+
+    return {
+      'moodSim': moodSim,
+      'semanticSim': semanticSim,
+      'habitSim': habitSim,
+      'total': total,
+    };
+  }
+
+  /// Calculates unified hybrid similarity between two thoughts/days.
+  double calculateHybridSimilarity(Thought a, Thought b) {
+    return getHybridSimilarityBreakdown(a, b)['total']!;
+  }
+
+  /// Groups historical thought data dynamically into organic mood spaces using hybrid similarity.
   List<List<Thought>> clusterHistory({double clusterThreshold = 0.55}) {
     final List<List<Thought>> clusters = [];
 
     for (final doc in _thoughts) {
       bool assigned = false;
-      final docVector = doc.embedding ?? _nlp.vectorize(doc.textContent);
-      if (doc.embedding == null) {
-        doc.embedding = docVector;
-      }
 
       for (final currentCluster in clusters) {
-        final firstVector = currentCluster.first.embedding ?? _nlp.vectorize(currentCluster.first.textContent);
-        if (currentCluster.first.embedding == null) {
-          currentCluster.first.embedding = firstVector;
+        // Average-Linkage: Compute the average unified similarity to all existing members of the cluster
+        double sumSimilarity = 0.0;
+        for (final existingDoc in currentCluster) {
+          sumSimilarity += calculateHybridSimilarity(doc, existingDoc);
         }
-        double similarity = _nlp.calculateSimilarity(docVector, firstVector);
-        if (similarity >= clusterThreshold) {
+        double avgSimilarity = sumSimilarity / currentCluster.length;
+
+        if (avgSimilarity >= clusterThreshold) {
           currentCluster.add(doc);
           assigned = true;
           break;
@@ -258,6 +314,7 @@ class DatabaseService {
       print("Warning: Log heavily back-dated. Memory reliability: ${(memoryWeight * 100).toStringAsFixed(0)}%");
     }
 
+    _habitLogs.removeWhere((l) => l.id == log.id);
     _habitLogs.add(log);
     await _saveAllData();
   }
@@ -319,6 +376,8 @@ class DatabaseService {
     List<double> moodSeries = [];
     List<double> sleepSeries = [];
     List<double> cycleDaySeries = [];
+    List<double> seizureSeries = [];
+    List<double> painSeries = [];
 
     for (var pLog in _physicalLogs) {
       final matchingThoughts = _thoughts.where((t) =>
@@ -336,6 +395,9 @@ class DatabaseService {
         } else {
           cycleDaySeries.add(0.0);
         }
+
+        seizureSeries.add((pLog.customSeizuresCount ?? 0).toDouble());
+        painSeries.add(pLog.customPainLevel ?? 0.0);
       }
     }
 
@@ -348,21 +410,27 @@ class DatabaseService {
 
     double sleepCorrelation = _calculatePearson(moodSeries, sleepSeries);
     double cycleCorrelation = _calculatePearson(moodSeries, cycleDaySeries);
+    double seizureCorrelation = _calculatePearson(moodSeries, seizureSeries);
+    double painCorrelation = _calculatePearson(moodSeries, painSeries);
 
     String status = "Your sanctuary baseline is balanced.";
-    String insight = "No heavy physical fatigue patterns are breaking through your wellness index today.";
+    String insight = "No heavy physical fatigue or symptom correlations are breaking through today.";
 
-    if (sleepCorrelation >= 0.5) {
+    if (seizureCorrelation <= -0.3) {
+      status = "Seizure Cluster Impact Detected ⚡";
+      insight = "A negative correlation is visible between seizures and mood. Seizure days significantly depress baseline mood scores.";
+    } else if (painCorrelation <= -0.4) {
+      status = "Chronic Pain Sensitivity Detected 🩺";
+      insight = "Elevated pain scores show a strong correlation with decreased daily mood averages. Focus on soothing habits on high-pain days.";
+    } else if (sleepCorrelation >= 0.5) {
       status = "Deep Sleep Buffer Detected 🛌";
       insight = "Your history shows a strong link between restful nights and calm days. Getting more than 8 hours of sleep acts as a reliable emotional cushion for you.";
-    }
-    else if (cycleCorrelation <= -0.4) {
+    } else if (cycleCorrelation <= -0.4) {
       status = "Cycle Shift Sensitivity detected 🌸";
       insight = "A quiet pattern suggests you feel a bit more overwhelmed on active period days. Settle in today with extra warmth, and give yourself permission to move slowly.";
-    }
-    else if (sleepCorrelation <= -0.4) {
+    } else if (sleepCorrelation <= -0.4) {
       status = "Fatigue Link Found ☁️";
-      insight = "Lower energy days frequently align with nights of restless sleep loss. Prioritize wind-down routines early tonight with a warm, comforting tea.";
+      insight = "Lower energy days frequently align with nights of restless sleep loss. Prioritize wind-down routines early tonight.";
     }
 
     return {
@@ -370,6 +438,8 @@ class DatabaseService {
       'insight': insight,
       'sleepCorrelation': sleepCorrelation.toStringAsFixed(2),
       'cycleCorrelation': cycleCorrelation.toStringAsFixed(2),
+      'seizureCorrelation': seizureCorrelation.toStringAsFixed(2),
+      'painCorrelation': painCorrelation.toStringAsFixed(2),
     };
   }
 
