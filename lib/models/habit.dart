@@ -27,12 +27,16 @@ class HabitLog {
   final String habitId;
   final DateTime occurrenceDate;
   final DateTime createdAt;
+  final int intensity; // represents subjective quality/effort on a 1 to 5 scale
+  final DateTime? actualOccurrenceTime; // allows backfilling real-time execution
 
   HabitLog({
     required this.id,
     required this.habitId,
     required this.occurrenceDate,
     required this.createdAt,
+    this.intensity = 5,
+    this.actualOccurrenceTime,
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,12 +44,21 @@ class HabitLog {
     'habitId': habitId,
     'occurrenceDate': occurrenceDate.toIso8601String(),
     'createdAt': createdAt.toIso8601String(),
+    'intensity': intensity,
+    'actualOccurrenceTime': actualOccurrenceTime?.toIso8601String(),
   };
 
-  factory HabitLog.fromJson(Map<String, dynamic> json) => HabitLog(
-    id: json['id'],
-    habitId: json['habitId'],
-    occurrenceDate: DateTime.parse(json['occurrenceDate']),
-    createdAt: DateTime.parse(json['createdAt']),
-  );
+  factory HabitLog.fromJson(Map<String, dynamic> json) {
+    final DateTime createdAtVal = DateTime.parse(json['createdAt']);
+    return HabitLog(
+      id: json['id'],
+      habitId: json['habitId'],
+      occurrenceDate: DateTime.parse(json['occurrenceDate']),
+      createdAt: createdAtVal,
+      intensity: json['intensity'] as int? ?? 5,
+      actualOccurrenceTime: json['actualOccurrenceTime'] != null
+          ? DateTime.parse(json['actualOccurrenceTime'])
+          : createdAtVal,
+    );
+  }
 }

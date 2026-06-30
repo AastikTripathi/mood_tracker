@@ -237,6 +237,11 @@ class DayTimelineDialog extends StatelessWidget {
 
   Widget _buildThoughtCard(Thought thought, bool isDark) {
     final moodColor = _getMoodColor(thought.moodScore);
+    String truncatedContent = thought.textContent;
+    if (truncatedContent.length > 55) {
+      truncatedContent = '${truncatedContent.substring(0, 55)}...';
+    }
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -254,20 +259,34 @@ class DayTimelineDialog extends StatelessWidget {
                 "Note logged ${_getMoodEmoji(thought.moodScore)}",
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: moodColor),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: moodColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text(
-                  "${thought.moodScore}/10",
-                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: moodColor),
-                ),
+              Text(
+                "${thought.moodScore}/10",
+                style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: moodColor),
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            thought.textContent,
-            style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white70 : Colors.black87, height: 1.35),
+            truncatedContent,
+            style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black87, height: 1.35),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 6,
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: thought.moodScore / 10.0,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: moodColor,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
           ),
         ],
       ),

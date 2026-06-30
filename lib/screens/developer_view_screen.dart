@@ -1703,22 +1703,35 @@ class _DeveloperViewScreenState extends State<DeveloperViewScreen> with SingleTi
   String _formatFeatureName(String raw) {
     switch (raw) {
       case 'intercept': return 'Baseline Intercept (c)';
-      case 'mood_lag': return 'Mood Carryover (Lag 1)';
-      case 'sleep': return 'Rest Duration (Sleep hours)';
-      case 'sleep_lag': return 'Sleep Carryover (Sleep Lag 1)';
       case 'pain': return 'Chronic Pain Index';
-      case 'pain_lag': return 'Pain Carryover (Pain Lag 1)';
       case 'seizures': return 'Seizure Incident Count';
-      case 'seizures_lag': return 'Seizure Carryover (Seizure Lag 1)';
-      case 'period': return 'Active Menstruation Cycle';
+      case 'isPeriodDay': return 'Active Menstruation Cycle';
+      case 'externalShockShield': return 'External Stress Shield Active';
       default:
         if (raw.startsWith('habit_')) {
-          final id = raw.replaceFirst('habit_', '');
+          String id = raw.replaceFirst('habit_', '');
+          String lagStr = '';
+          if (id.endsWith('_lag0')) {
+            id = id.substring(0, id.length - 5);
+            lagStr = ' (Today)';
+          } else if (id.endsWith('_lag1')) {
+            id = id.substring(0, id.length - 5);
+            lagStr = ' (Yesterday)';
+          } else if (id.endsWith('_lag2')) {
+            id = id.substring(0, id.length - 5);
+            lagStr = ' (2 Days Ago)';
+          } else if (id.endsWith('_lag3')) {
+            id = id.substring(0, id.length - 5);
+            lagStr = ' (3 Days Ago)';
+          }
+
           final match = widget.availableHabits.cast<HabitDefinition?>().firstWhere(
             (h) => h!.id == id || h.name == id,
             orElse: () => null,
           );
-          return match != null ? "Routine: ${match.iconEmoji} ${match.name}" : "Routine: $id";
+          return match != null
+              ? "Routine: ${match.iconEmoji} ${match.name}$lagStr"
+              : "Routine: $id$lagStr";
         }
         return raw;
     }

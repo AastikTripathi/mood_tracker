@@ -8,6 +8,12 @@ class Thought {
   String? linkedThoughtId;
   String? connectionReason;
   List<double>? embedding;
+  
+  // New intraday metrics tracking fields
+  String? prevNoteId; // stores immediate prior note from the same day
+  List<String> habitsSincePrev; // stores habit ids executed in the window between notes
+  double? minutesSincePrev; // stores precise time elapsed between notes
+  bool externalShockShield; // Acts as our unmeasured stress gatekeeper
 
   Thought({
     required this.id,
@@ -19,6 +25,10 @@ class Thought {
     this.linkedThoughtId,
     this.connectionReason,
     this.embedding,
+    this.prevNoteId,
+    this.habitsSincePrev = const [],
+    this.minutesSincePrev,
+    this.externalShockShield = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -31,6 +41,10 @@ class Thought {
     'linkedThoughtId': linkedThoughtId,
     'connectionReason': connectionReason,
     'embedding': embedding,
+    'prevNoteId': prevNoteId,
+    'habitsSincePrev': habitsSincePrev,
+    'minutesSincePrev': minutesSincePrev,
+    'externalShockShield': externalShockShield,
   };
 
   factory Thought.fromJson(Map<String, dynamic> json) {
@@ -43,6 +57,14 @@ class Thought {
       userTags: List<String>.from(json['userTags'] ?? []),
       linkedThoughtId: json['linkedThoughtId'],
       connectionReason: json['connectionReason'],
+      prevNoteId: json['prevNoteId'],
+      habitsSincePrev: json['habitsSincePrev'] != null
+          ? List<String>.from(json['habitsSincePrev'])
+          : const [],
+      minutesSincePrev: json['minutesSincePrev'] != null
+          ? (json['minutesSincePrev'] as num).toDouble()
+          : null,
+      externalShockShield: json['externalShockShield'] ?? false,
     );
     if (json['embedding'] != null) {
       thought.embedding = List<double>.from(

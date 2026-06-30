@@ -12,6 +12,7 @@ class PhysicalLog {
   String get flowLevel => _flowLevel ?? 'None';
   set flowLevel(String value) => _flowLevel = value;
   List<String> cycleSymptoms;  // Symptoms: Cramps, Bloating, Headache, Fatigue, etc.
+  int? cycleDay;               // Optional track mapping for the 28-day hormonal cycle
 
   PhysicalLog({
     required this.date,
@@ -25,6 +26,7 @@ class PhysicalLog {
     List<String>? painLogs,
     String? flowLevel = 'None',
     List<String>? cycleSymptoms,
+    this.cycleDay,
   }) : seizureTimes = seizureTimes ?? [],
        painLogs = painLogs ?? [],
        _flowLevel = flowLevel ?? 'None',
@@ -42,6 +44,7 @@ class PhysicalLog {
     'painLogs': painLogs,
     'flowLevel': flowLevel,
     'cycleSymptoms': cycleSymptoms,
+    'cycleDay': cycleDay,
   };
 
   factory PhysicalLog.fromJson(Map<String, dynamic> json) => PhysicalLog(
@@ -56,5 +59,6 @@ class PhysicalLog {
     painLogs: json['painLogs'] != null ? List<String>.from(json['painLogs']) : [],
     flowLevel: json['flowLevel'] ?? 'None',
     cycleSymptoms: json['cycleSymptoms'] != null ? List<String>.from(json['cycleSymptoms']) : [],
+    cycleDay: json['cycleDay'] as int?,
   );
 }

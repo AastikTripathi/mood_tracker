@@ -43,6 +43,9 @@ class DatabaseService {
 
   bool _isInitialized = false;
 
+  final Map<String, double> _dailyResiduals = {};
+  Map<String, double> getDailyResiduals() => _dailyResiduals;
+
   Future<File> _getSaveFile() async {
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/garden_save.json');
@@ -133,8 +136,46 @@ class DatabaseService {
   }
 
   /// Processes a new journal input, builds its vector footprint, and saves to disk
-  Future<void> saveThought(Thought thought) async {
-    // Generate the 384D mathematical vector profile exactly once and save it in the object
+  Future<void> saveThought(Thought thought, {bool externalShock = false}) async {
+    // 1. Intraday Chronological Linked List & Habit Windows Calculation
+    final currentTimestamp = thought.timestamp;
+    final currentDayKey = DateTime(currentTimestamp.year, currentTimestamp.month, currentTimestamp.day);
+
+    // Isolate same-day thoughts (excluding the current one)
+    final sameDayThoughts = _thoughts.where((t) {
+      if (t.id == thought.id) return false;
+      final tDay = DateTime(t.timestamp.year, t.timestamp.month, t.timestamp.day);
+      return tDay == currentDayKey;
+    }).toList();
+
+    // Isolate predecessor notes (earlier in the day)
+    final predecessorThoughts = sameDayThoughts.where((t) => t.timestamp.isBefore(currentTimestamp)).toList();
+
+    if (predecessorThoughts.isNotEmpty) {
+      // Find the closest predecessor in time
+      predecessorThoughts.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      final priorThought = predecessorThoughts.last;
+
+      thought.prevNoteId = priorThought.id;
+      final delta = currentTimestamp.difference(priorThought.timestamp);
+      thought.minutesSincePrev = delta.inSeconds.toDouble() / 60.0;
+
+      // Extract habit log ids executed in the window between the notes
+      final matchingHabits = _habitLogs.where((log) {
+        return log.occurrenceDate.isAfter(priorThought.timestamp) &&
+            (log.occurrenceDate.isBefore(currentTimestamp) || log.occurrenceDate.isAtSameMomentAs(currentTimestamp));
+      }).map((log) => log.habitId).toList();
+
+      thought.habitsSincePrev = matchingHabits;
+    } else {
+      thought.prevNoteId = null;
+      thought.minutesSincePrev = null;
+      thought.habitsSincePrev = const [];
+    }
+
+    thought.externalShockShield = externalShock;
+
+    // 2. Vector footprint generation & semantic link tracking
     final currentVector = _nlp.vectorize(thought.textContent);
     thought.embedding = currentVector;
 
@@ -523,69 +564,176 @@ class DatabaseService {
 
   /// Runs multi-variable regularized Ridge Regression to isolate independent effects on mood.
   Map<String, dynamic>? performRidgeRegression() {
-    final records = _compileDailyRecords();
-    if (records.length < 10) return null;
-
-    final List<String> habitIds = _habitDefinitions.map((h) => h.id).where((id) => id != 'seizure').toList();
-
-    final List<String> featureNames = [
-      'intercept',
-      'mood_lag',
-      'sleep',
-      'sleep_lag',
-      'pain',
-      'pain_lag',
-      'seizures',
-      'seizures_lag',
-      'period',
-    ];
-    for (var hid in habitIds) {
-      featureNames.add('habit_$hid');
+    if (_thoughts.isEmpty && _physicalLogs.isEmpty && _habitLogs.isEmpty) {
+      return null;
     }
 
-    int numFeatures = featureNames.length;
-    List<List<double>> X = [];
-    List<double> y = [];
+    // 1. Find earliest logged date
+    DateTime earliest = DateTime.now();
+    bool foundAny = false;
+    for (var t in _thoughts) {
+      if (t.timestamp.isBefore(earliest)) {
+        earliest = t.timestamp;
+        foundAny = true;
+      }
+    }
+    for (var p in _physicalLogs) {
+      if (p.date.isBefore(earliest)) {
+        earliest = p.date;
+        foundAny = true;
+      }
+    }
+    for (var h in _habitLogs) {
+      if (h.occurrenceDate.isBefore(earliest)) {
+        earliest = h.occurrenceDate;
+        foundAny = true;
+      }
+    }
 
-    for (int t = 1; t < records.length; t++) {
-      final today = records[t];
-      final yesterday = records[t - 1];
+    if (!foundAny) return null;
 
-      if (today.date.difference(yesterday.date).inDays > 3) continue;
+    DateTime earliestDate = DateTime(earliest.year, earliest.month, earliest.day);
+    DateTime todayDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
 
-      List<double> row = List.filled(numFeatures, 0.0);
-      row[0] = 1.0;
-      row[1] = yesterday.mood;
-      row[2] = today.sleep;
-      row[3] = yesterday.sleep;
-      row[4] = today.pain;
-      row[5] = yesterday.pain;
-      row[6] = today.seizures;
-      row[7] = yesterday.seizures;
-      row[8] = today.period;
+    // Build chronological continuous grid of dates
+    final List<DateTime> dateGrid = [];
+    DateTime current = earliestDate;
+    while (current.isBefore(todayDate) || current.isAtSameMomentAs(todayDate)) {
+      dateGrid.add(current);
+      current = current.add(const Duration(days: 1));
+    }
 
-      for (int i = 0; i < habitIds.length; i++) {
-        row[9 + i] = today.habits.contains(habitIds[i]) ? 1.0 : 0.0;
+    if (dateGrid.length < 5) return null;
+
+    // Get habit definitions (excluding seizure)
+    final habitIds = _habitDefinitions.map((h) => h.id).where((id) => id != 'seizure').toList();
+
+    // Features layout:
+    // Index 0: intercept (always 1.0)
+    // Index 1: pain
+    // Index 2: seizures
+    // Index 3: isPeriodDay
+    // Index 4: externalShockShield
+    // Next: for each habit H, generate lag0, lag1, lag2, lag3
+    final List<String> featureNames = [
+      'intercept',
+      'pain',
+      'seizures',
+      'isPeriodDay',
+      'externalShockShield',
+    ];
+
+    for (final hid in habitIds) {
+      featureNames.add('habit_${hid}_lag0');
+      featureNames.add('habit_${hid}_lag1');
+      featureNames.add('habit_${hid}_lag2');
+      featureNames.add('habit_${hid}_lag3');
+    }
+
+    final int numFeatures = featureNames.length;
+
+    // We build the complete matrices for ALL dates in the grid
+    final List<List<double>> rawX = [];
+    final List<double?> rawY = []; // Nullable, representing days with no mood logs
+
+    // Date-indexed lookups to speed up building the grid
+    final Map<String, PhysicalLog> physicalMap = {};
+    for (final p in _physicalLogs) {
+      final key = "${p.date.year}-${p.date.month}-${p.date.day}";
+      physicalMap[key] = p;
+    }
+
+    final Map<String, List<Thought>> thoughtsMap = {};
+    for (final t in _thoughts) {
+      final key = "${t.timestamp.year}-${t.timestamp.month}-${t.timestamp.day}";
+      thoughtsMap.putIfAbsent(key, () => []).add(t);
+    }
+
+    // Dynamic intensity mapping helper for a habit on a target date
+    double getHabitIntensity(String hid, DateTime date) {
+      final dayLogs = _habitLogs.where((log) =>
+          log.habitId == hid &&
+          log.occurrenceDate.year == date.year &&
+          log.occurrenceDate.month == date.month &&
+          log.occurrenceDate.day == date.day
+      ).toList();
+
+      if (dayLogs.isEmpty) return 0.0;
+      final maxIntensity = dayLogs.map((l) => l.intensity).reduce(math.max);
+      return maxIntensity / 5.0; // Normalized scale: 0.2 to 1.0
+    }
+
+    for (int t = 0; t < dateGrid.length; t++) {
+      final date = dateGrid[t];
+      final key = "${date.year}-${date.month}-${date.day}";
+
+      final pLog = physicalMap[key];
+      final double pain = pLog?.customPainLevel ?? 0.0;
+      final double seizures = (pLog?.customSeizuresCount ?? 0).toDouble();
+      final double period = (pLog?.isPeriodDay == true || pLog?.flowLevel != 'None') ? 1.0 : 0.0;
+
+      final dayThoughts = thoughtsMap[key] ?? [];
+      final double shock = dayThoughts.any((th) => th.externalShockShield) ? 1.0 : 0.0;
+
+      final List<double> row = List.filled(numFeatures, 0.0);
+      row[0] = 1.0; // Intercept
+      row[1] = pain;
+      row[2] = seizures;
+      row[3] = period;
+      row[4] = shock;
+
+      // Populate habit lag features
+      int colOffset = 5;
+      for (final hid in habitIds) {
+        // lag0 (today)
+        row[colOffset] = getHabitIntensity(hid, date);
+        // lag1 (yesterday)
+        row[colOffset + 1] = (t >= 1) ? getHabitIntensity(hid, dateGrid[t - 1]) : 0.0;
+        // lag2 (2 days ago)
+        row[colOffset + 2] = (t >= 2) ? getHabitIntensity(hid, dateGrid[t - 2]) : 0.0;
+        // lag3 (3 days ago)
+        row[colOffset + 3] = (t >= 3) ? getHabitIntensity(hid, dateGrid[t - 3]) : 0.0;
+        colOffset += 4;
       }
 
-      X.add(row);
-      y.add(today.mood);
+      rawX.add(row);
+
+      if (dayThoughts.isNotEmpty) {
+        final sum = dayThoughts.map((th) => th.moodScore.toDouble()).reduce((a, b) => a + b);
+        rawY.add(sum / dayThoughts.length);
+      } else {
+        rawY.add(null);
+      }
+    }
+
+    // 4. The Slice: remove row indexes where daily mean mood is null
+    final List<List<double>> X = [];
+    final List<double> y = [];
+    final List<DateTime> cleanDates = [];
+
+    for (int i = 0; i < rawX.length; i++) {
+      if (rawY[i] != null) {
+        X.add(rawX[i]);
+        y.add(rawY[i]!);
+        cleanDates.add(dateGrid[i]);
+      }
     }
 
     if (X.length < 5) return null;
 
+    // 5. The Ridge Solver
     final Xt = MatrixMath.transpose(X);
     final XtX = MatrixMath.multiply(Xt, X);
 
-    double lambda = 1.0;
-    for (int i = 0; i < numFeatures; i++) {
+    final double lambda = 0.85;
+    for (int i = 1; i < numFeatures; i++) { // Skip intercept (i = 0)
       XtX[i][i] += lambda;
     }
 
     final invXtX = MatrixMath.invert(XtX);
     if (invXtX == null) return null;
 
-    List<double> Xty = List.filled(numFeatures, 0.0);
+    final List<double> Xty = List.filled(numFeatures, 0.0);
     for (int i = 0; i < numFeatures; i++) {
       double sum = 0.0;
       for (int j = 0; j < X.length; j++) {
@@ -596,6 +744,18 @@ class DatabaseService {
 
     final List<double> beta = MatrixMath.multiplyVector(invXtX, Xty);
 
+    // Save daily residuals (y - X * beta)
+    _dailyResiduals.clear();
+    for (int i = 0; i < X.length; i++) {
+      final date = cleanDates[i];
+      final key = "${date.year}-${date.month}-${date.day}";
+      double predicted = 0.0;
+      for (int j = 0; j < numFeatures; j++) {
+        predicted += X[i][j] * beta[j];
+      }
+      _dailyResiduals[key] = y[i] - predicted;
+    }
+
     final Map<String, double> coefficients = {};
     for (int i = 0; i < numFeatures; i++) {
       coefficients[featureNames[i]] = beta[i];
@@ -604,6 +764,176 @@ class DatabaseService {
     return {
       'coefficients': coefficients,
       'sampleSize': X.length,
+    };
+  }
+
+  Map<String, double> computeStratifiedBaselines() {
+    final Map<String, List<double>> phaseResiduals = {
+      'menstrual': [],
+      'follicular': [],
+      'ovulatory': [],
+      'luteal': [],
+    };
+
+    for (final p in _physicalLogs) {
+      final key = "${p.date.year}-${p.date.month}-${p.date.day}";
+      final residual = _dailyResiduals[key];
+      if (residual == null) continue;
+
+      String phase;
+      if (p.isPeriodDay || p.flowLevel != 'None') {
+        phase = 'menstrual';
+      } else {
+        final cDay = p.cycleDay;
+        if (cDay != null) {
+          if (cDay >= 6 && cDay <= 13) {
+            phase = 'follicular';
+          } else if (cDay >= 14 && cDay <= 16) {
+            phase = 'ovulatory';
+          } else if (cDay >= 17 && cDay <= 28) {
+            phase = 'luteal';
+          } else {
+            continue;
+          }
+        } else {
+          continue;
+        }
+      }
+      phaseResiduals[phase]!.add(residual);
+    }
+
+    final Map<String, double> baselines = {};
+    phaseResiduals.forEach((phase, list) {
+      if (list.length >= 4) {
+        list.sort();
+        final n = list.length;
+        final trim = (n * 0.1).floor();
+        final trimmed = list.sublist(trim, n - trim);
+        if (trimmed.isNotEmpty) {
+          final sum = trimmed.reduce((a, b) => a + b);
+          baselines[phase] = sum / trimmed.length;
+        }
+      }
+    });
+
+    return baselines;
+  }
+
+  Map<String, double> computeWithinPhaseResiduals(Map<String, double> baselines) {
+    final Map<String, double> withinPhase = {};
+    for (final p in _physicalLogs) {
+      final key = "${p.date.year}-${p.date.month}-${p.date.day}";
+      final residual = _dailyResiduals[key];
+      if (residual == null) continue;
+
+      String? phase;
+      if (p.isPeriodDay || p.flowLevel != 'None') {
+        phase = 'menstrual';
+      } else {
+        final cDay = p.cycleDay;
+        if (cDay != null) {
+          if (cDay >= 6 && cDay <= 13) {
+            phase = 'follicular';
+          } else if (cDay >= 14 && cDay <= 16) {
+            phase = 'ovulatory';
+          } else if (cDay >= 17 && cDay <= 28) {
+            phase = 'luteal';
+          }
+        }
+      }
+      if (phase != null && baselines.containsKey(phase)) {
+        withinPhase[key] = residual - baselines[phase]!;
+      }
+    }
+    return withinPhase;
+  }
+
+  Map<String, double> calculateCorrelations() {
+    final regression = performRidgeRegression();
+    if (regression == null) return {};
+    final coeffs = regression['coefficients'] as Map<String, double>;
+
+    final Map<String, double> netLifts = {};
+    final habitIds = _habitDefinitions.map((h) => h.id).where((id) => id != 'seizure').toList();
+    for (final hid in habitIds) {
+      double sum = 0.0;
+      sum += coeffs['habit_${hid}_lag0'] ?? 0.0;
+      sum += coeffs['habit_${hid}_lag1'] ?? 0.0;
+      sum += coeffs['habit_${hid}_lag2'] ?? 0.0;
+      sum += coeffs['habit_${hid}_lag3'] ?? 0.0;
+      netLifts[hid] = sum;
+    }
+    return netLifts;
+  }
+
+  Map<String, dynamic> describeStrongestFactor() {
+    final uniqueDaysWithMood = _thoughts.map((t) => "${t.timestamp.year}-${t.timestamp.month}-${t.timestamp.day}").toSet().length;
+
+    if (uniqueDaysWithMood < 7) {
+      final daysLeft = 7 - uniqueDaysWithMood;
+      return {
+        'coldStart': true,
+        'message': '$daysLeft more days to unlock patterns',
+      };
+    }
+
+    final regression = performRidgeRegression();
+    if (regression == null) {
+      return {
+        'coldStart': true,
+        'message': 'Log more notes alongside your routines to unlock patterns',
+      };
+    }
+
+    final coeffs = regression['coefficients'] as Map<String, double>;
+    final netLifts = calculateCorrelations();
+    if (netLifts.isEmpty) {
+      return {
+        'coldStart': true,
+        'message': 'No routines detected yet.',
+      };
+    }
+
+    final sortedHabits = netLifts.entries.toList()
+      ..sort((a, b) => b.value.abs().compareTo(a.value.abs()));
+
+    final strongest = sortedHabits.first;
+    final String strongestId = strongest.key;
+    final double netLift = strongest.value;
+
+    final double lag0 = coeffs['habit_${strongestId}_lag0'] ?? 0.0;
+    final double lag1 = coeffs['habit_${strongestId}_lag1'] ?? 0.0;
+    final double lag2 = coeffs['habit_${strongestId}_lag2'] ?? 0.0;
+
+    String label = "A Steady Support";
+    if (lag0 > 0.1 && (lag1 < lag0 * 0.6)) {
+      label = "An Instant Spark";
+    } else if (lag0 <= 0.05 && lag2 > 0.1) {
+      label = "A Gentle Investment";
+    }
+
+    final match = _habitDefinitions.cast<HabitDefinition?>().firstWhere(
+      (h) => h!.id == strongestId || h.name == strongestId,
+      orElse: () => null,
+    );
+    final habitName = match != null ? match.name : strongestId;
+    final habitEmoji = match != null ? match.iconEmoji : '🌿';
+
+    String description = '';
+    if (netLift > 0) {
+      description = "Completing '$habitName' feels like it lifts your mood. These routines tend to line up with a brighter headspace.";
+    } else {
+      description = "Your records suggest '$habitName' is a support routine you turn to on heavier days to ground yourself.";
+    }
+
+    return {
+      'coldStart': false,
+      'habitId': strongestId,
+      'name': habitName,
+      'emoji': habitEmoji,
+      'netLift': netLift,
+      'label': label,
+      'description': description,
     };
   }
 

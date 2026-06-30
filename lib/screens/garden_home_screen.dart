@@ -10,7 +10,7 @@ import '../painters/plant_painter.dart';
 import '../services/database_service.dart';
 import '../widgets/habit_tracker_card.dart';
 import '../widgets/cozy_almanac_card.dart';
-import 'detailed_analytics_screen.dart';
+import '../widgets/causal_correlation_card.dart';
 import 'developer_view_screen.dart';
 import 'journal_entry_screen.dart';
 import 'journal_history_screen.dart';
@@ -651,56 +651,13 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
 
                     const SizedBox(height: 24),
 
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => DetailedAnalyticsScreen(
-                              historyThoughts: _historyThoughts,
-                              availableHabits: _availableHabits,
-                              allHabitLogs: _allHabitLogs,
-                              physicalLogs: _db.getPhysicalLogs(),
-                              isTwilight: _isTwilight,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: _getDashboardCardColor(),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: Colors.teal.withOpacity(0.12)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.analytics_outlined, color: Colors.teal, size: 24),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    "Deep Analytics & Patterns",
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: _isTwilight ? Colors.white : Colors.black87,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  const Text(
-                                    "Analyze routine consistency & physical tracking trends.",
-                                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.teal),
-                          ],
-                        ),
-                      ),
+                    CausalCorrelationCard(
+                      historyThoughts: _historyThoughts,
+                      availableHabits: _availableHabits.where((h) => h.id != 'seizure').toList(),
+                      allHabitLogs: _allHabitLogs,
+                      physicalLogs: _db.getPhysicalLogs(),
+                      isTwilight: _isTwilight,
+                      db: _db,
                     ),
 
                     const SizedBox(height: 20),
@@ -1176,15 +1133,13 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
 
                     await _db.clearData();
                     final now = DateTime.now();
-                    int highIdx = 0;
-                    int medIdx = 0;
                     int lowIdx = 0;
 
                     for (int i = 45; i >= 1; i--) {
                       final day = now.subtract(Duration(days: i));
                       
                       // 1. Determine period cycle properties
-                      final cycleDay = i % 28;
+                      final cycleDay = (i % 28) + 1;
                       final isPeriod = cycleDay >= 1 && cycleDay <= 5;
                       String flow = 'None';
                       List<String> symptoms = [];
@@ -1203,6 +1158,10 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         mood = 3;
                         pain = 7.0;
                         sleepHours = 5.5;
+                      } else if (i == 30 || i == 10 || i == 5) {
+                        mood = 2;
+                        pain = 0.0;
+                        sleepHours = 7.0;
                       } else if (i == 39 || i == 19) {
                         mood = 8;
                         pain = 2.0;
@@ -1213,14 +1172,19 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         mood = cycleDay == 3 ? 3 : 5;
                       } else {
                         if (i % 12 == 0) {
-                          pain = 5.5;
-                          sleepHours = 5.0;
-                          mood = 4;
+                           pain = 5.5;
+                           sleepHours = 5.0;
+                           mood = 4;
                         } else {
-                          pain = (i % 7 == 0) ? 2.0 : 0.0;
-                          sleepHours = (i % 5 == 0) ? 8.5 : 7.5;
-                          mood = (i % 7 == 0) ? 6 : ((i % 10 == 0) ? 9 : 8);
+                           pain = (i % 7 == 0) ? 2.0 : 0.0;
+                           sleepHours = (i % 5 == 0) ? 8.5 : 7.5;
+                           mood = (i % 7 == 0) ? 6 : ((i % 10 == 0) ? 9 : 8);
                         }
+                      }
+
+                      // Exercise boost: completing exercise on every 3rd day boosts mood slightly
+                      if (i % 3 == 0) {
+                        mood = math.min(mood + 1, 10);
                       }
 
                       // Habit Decay: Napping boosts mood in past but drags it recently
@@ -1239,7 +1203,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       
                       // Seizures
                       List<String> seizures = [];
-                      if ((sleepHours < 6.5 && pain > 5.0) || (i == 40 || i == 20)) {
+                      if (i == 40 || i == 20 || i == 30 || i == 10 || i == 5) {
                         seizures = ["10:30 AM"];
                       }
                       
@@ -1255,9 +1219,10 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         seizureTimes: seizures,
                         flowLevel: flow,
                         cycleSymptoms: symptoms,
+                        cycleDay: cycleDay,
                       ));
                       
-                      // Save Thoughts using dynamically matched seed reflections
+                      // Save Thoughts using dynamically matched seed reflections (3 logs a day)
                       final matchingReflections = seedReflections.where((ref) {
                         final int m = ref['mood'] as int;
                         if (mood <= 4) return m <= 4;
@@ -1265,28 +1230,40 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         return m >= 5 && m <= 7;
                       }).toList();
 
-                      final Map<String, dynamic> selectedRef;
-                      if (mood <= 4) {
-                        selectedRef = matchingReflections[lowIdx % matchingReflections.length];
-                        lowIdx++;
-                      } else if (mood >= 8) {
-                        selectedRef = matchingReflections[highIdx % matchingReflections.length];
-                        highIdx++;
-                      } else {
-                        selectedRef = matchingReflections[medIdx % matchingReflections.length];
-                        medIdx++;
-                      }
-
-                      final text = selectedRef['text'] as String;
-                      final categories = List<String>.from(selectedRef['categories'] as List);
-                      
+                      // Morning (9:00 AM)
+                      final ref1 = matchingReflections[lowIdx % matchingReflections.length];
+                      lowIdx++;
                       await _db.saveThought(Thought(
-                        id: 'mock_day_$i',
-                        timestamp: day,
+                        id: 'mock_day_${i}_morning',
+                        timestamp: day.add(const Duration(hours: 9)),
                         moodScore: mood,
-                        textContent: text,
-                        categories: categories,
-                        userTags: [categories.first],
+                        textContent: ref1['text'] as String,
+                        categories: List<String>.from(ref1['categories'] as List),
+                        userTags: [List<String>.from(ref1['categories'] as List).first],
+                      ));
+
+                      // Afternoon (2:00 PM)
+                      final ref2 = matchingReflections[(lowIdx + 1) % matchingReflections.length];
+                      lowIdx++;
+                      await _db.saveThought(Thought(
+                        id: 'mock_day_${i}_afternoon',
+                        timestamp: day.add(const Duration(hours: 14)),
+                        moodScore: (mood + 1).clamp(1, 10),
+                        textContent: ref2['text'] as String,
+                        categories: List<String>.from(ref2['categories'] as List),
+                        userTags: [List<String>.from(ref2['categories'] as List).first],
+                      ));
+
+                      // Evening (8:00 PM)
+                      final ref3 = matchingReflections[(lowIdx + 2) % matchingReflections.length];
+                      lowIdx++;
+                      await _db.saveThought(Thought(
+                        id: 'mock_day_${i}_evening',
+                        timestamp: day.add(const Duration(hours: 20)),
+                        moodScore: (mood - 1).clamp(1, 10),
+                        textContent: ref3['text'] as String,
+                        categories: List<String>.from(ref3['categories'] as List),
+                        userTags: [List<String>.from(ref3['categories'] as List).first],
                       ));
                       
                       // Save Habit Logs
@@ -1297,6 +1274,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           habitId: 'seizure',
                           occurrenceDate: dt,
                           createdAt: dt,
+                          intensity: 5,
                         ));
                       }
                       
@@ -1307,6 +1285,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           habitId: 'eating',
                           occurrenceDate: day.add(const Duration(hours: 12)),
                           createdAt: day,
+                          intensity: (i % 3) + 3, // varied intensity: 3, 4, or 5
                         ));
                       }
                       
@@ -1317,6 +1296,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           habitId: 'napping',
                           occurrenceDate: day.add(const Duration(hours: 15)),
                           createdAt: day,
+                          intensity: (i % 3) + 2, // varied intensity: 2, 3, or 4
                         ));
                       }
                       
@@ -1336,6 +1316,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           habitId: 'gardening',
                           occurrenceDate: day.add(const Duration(hours: 10)),
                           createdAt: day,
+                          intensity: 5,
                         ));
                       }
                       
@@ -1345,16 +1326,18 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           habitId: 'stepping_out',
                           occurrenceDate: day.add(const Duration(hours: 11)),
                           createdAt: day,
+                          intensity: 4,
                         ));
                       }
                       
                       // Exercise
-                      if (mood >= 8 && i % 3 == 0) {
+                      if (i % 3 == 0) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_exercise_$i',
                           habitId: 'exercise',
                           occurrenceDate: day.add(const Duration(hours: 17)),
                           createdAt: day,
+                          intensity: 5,
                         ));
                       }
                     }

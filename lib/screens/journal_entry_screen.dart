@@ -4,6 +4,7 @@ import '../models/physical_log.dart';
 import '../models/habit.dart';
 import '../services/database_service.dart';
 import '../services/nlp_service.dart';
+import '../widgets/past_echoes_dialog.dart';
 
 class JournalEntryScreen extends StatefulWidget {
   const JournalEntryScreen({super.key});
@@ -529,6 +530,31 @@ class _JournalEntryScreenState extends State<JournalEntryScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              OutlinedButton.icon(
+                onPressed: () {
+                  PastEchoesDialog.show(
+                    context,
+                    currentMood: _moodValue,
+                    currentPain: _painLevel,
+                    currentSleep: _sleepHours,
+                    currentPeriod: _isPeriodDay,
+                    currentSeizures: _seizureTimes,
+                    db: _db,
+                  );
+                },
+                icon: const Icon(Icons.waves, size: 14, color: Colors.teal),
+                label: const Text(
+                  "Look for past echoes",
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.teal.withOpacity(0.2)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
               const SizedBox(height: 12),

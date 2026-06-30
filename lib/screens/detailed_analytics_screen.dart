@@ -1211,26 +1211,33 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
     final coeffs = _regressionResults!['coefficients'] as Map<String, double>;
     final sampleSize = _regressionResults!['sampleSize'] as int;
 
-    final double inertia = coeffs['mood_lag'] ?? 0.0;
-    final double sleepCoeff = coeffs['sleep'] ?? 0.0;
-    final double sleepLagCoeff = coeffs['sleep_lag'] ?? 0.0;
     final double painCoeff = coeffs['pain'] ?? 0.0;
-    final double painLagCoeff = coeffs['pain_lag'] ?? 0.0;
     final double seizuresCoeff = coeffs['seizures'] ?? 0.0;
-    final double seizuresLagCoeff = coeffs['seizures_lag'] ?? 0.0;
-    final double periodCoeff = coeffs['period'] ?? 0.0;
+    final double periodCoeff = coeffs['isPeriodDay'] ?? coeffs['period'] ?? 0.0;
+    final double shockCoeff = coeffs['externalShockShield'] ?? 0.0;
+
+    // Sum habits across lags to represent the actual cumulative effect
+    final Map<String, double> habitSums = {};
+    coeffs.forEach((key, val) {
+      if (key.startsWith('habit_')) {
+        String hid = key.replaceFirst('habit_', '');
+        if (hid.endsWith('_lag0') || hid.endsWith('_lag1') || hid.endsWith('_lag2') || hid.endsWith('_lag3')) {
+          hid = hid.substring(0, hid.length - 5);
+        }
+        habitSums[hid] = (habitSums[hid] ?? 0.0) + val;
+      }
+    });
 
     final List<Widget> habitRows = [];
-    coeffs.forEach((key, val) {
-      if (key.startsWith('habit_') && val.abs() > 0.05) {
-        final hid = key.replaceFirst('habit_', '');
+    habitSums.forEach((hid, val) {
+      if (val.abs() > 0.01) {
         final match = widget.availableHabits.cast<HabitDefinition?>().firstWhere(
           (h) => h!.id == hid || h.name == hid,
           orElse: () => null,
         );
         if (match != null) {
-          habitRows.add(_buildRegressionRow(
-            label: "${match.iconEmoji} ${match.name}",
+          habitRows.add(_buildDivergingImpactRow(
+            label: match.name,
             value: val,
             isDark: isDark,
           ));
@@ -1271,58 +1278,37 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            "These metrics use Ridge Regression to control for confounding parameters, separating the independent effect of each factor on your mood.",
+            "These metrics help isolate the independent connection of each factor on your mood.",
             style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.grey, height: 1.4),
           ),
           const SizedBox(height: 16),
           Text(
-            "Emotional & Physical Parameters",
+            "Environmental & Physical Parameters",
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
           ),
           const SizedBox(height: 10),
-          _buildRegressionRow(
-            label: "Mood Inertia (Yesterday's Mood carryover)",
-            value: inertia,
-            isDark: isDark,
-            helpText: "Positive means mood naturally persists; negative means rapid fluctuation.",
-          ),
-          _buildRegressionRow(
-            label: "Today's Rest (Sleep hours today)",
-            value: sleepCoeff,
-            isDark: isDark,
-          ),
-          _buildRegressionRow(
-            label: "Yesterday's Rest (Sleep lag impact)",
-            value: sleepLagCoeff,
-            isDark: isDark,
-            helpText: "Measures carry-over effect of sleep.",
-          ),
-          _buildRegressionRow(
-            label: "Today's Chronic Pain Index",
-            value: painCoeff,
-            isDark: isDark,
-          ),
-          _buildRegressionRow(
-            label: "Yesterday's Pain Index (Pain lag impact)",
-            value: painLagCoeff,
-            isDark: isDark,
-          ),
-          if (seizuresCoeff.abs() > 0.05)
-            _buildRegressionRow(
-              label: "Today's Seizure Incident Count",
+          if (painCoeff.abs() > 0.01)
+            _buildDivergingImpactRow(
+              label: "Chronic Pain Index",
+              value: painCoeff,
+              isDark: isDark,
+            ),
+          if (seizuresCoeff.abs() > 0.01)
+            _buildDivergingImpactRow(
+              label: "Seizure Incident Count",
               value: seizuresCoeff,
               isDark: isDark,
             ),
-          if (seizuresLagCoeff.abs() > 0.05)
-            _buildRegressionRow(
-              label: "Yesterday's Seizure count (Lag impact)",
-              value: seizuresLagCoeff,
+          if (periodCoeff.abs() > 0.01)
+            _buildDivergingImpactRow(
+              label: "Menstrual Cycle Impact",
+              value: periodCoeff,
               isDark: isDark,
             ),
-          if (periodCoeff.abs() > 0.05)
-            _buildRegressionRow(
-              label: "Active Cycle Day (Menstruation)",
-              value: periodCoeff,
+          if (shockCoeff.abs() > 0.01)
+            _buildDivergingImpactRow(
+              label: "Stress Shield Active",
+              value: shockCoeff,
               isDark: isDark,
             ),
           if (habitRows.isNotEmpty) ...[
@@ -1330,7 +1316,7 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
             const Divider(height: 1),
             const SizedBox(height: 14),
             Text(
-              "Confounder-Free Routine Impacts",
+              "Routine Impacts",
               style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
             ),
             const SizedBox(height: 10),
@@ -1354,7 +1340,6 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
               border: Border.all(color: Colors.teal.withOpacity(0.08)),
             ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: _generateConversationalInsights(coeffs).map((insight) {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 6.0),
@@ -1387,41 +1372,45 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
   List<String> _generateConversationalInsights(Map<String, double> coeffs) {
     final List<String> insights = [];
 
-    final double sleep = coeffs['sleep'] ?? 0.0;
-    final double sleepLag = coeffs['sleep_lag'] ?? 0.0;
     final double pain = coeffs['pain'] ?? 0.0;
     final double seizures = coeffs['seizures'] ?? 0.0;
-    final double period = coeffs['period'] ?? 0.0;
+    final double period = coeffs['isPeriodDay'] ?? coeffs['period'] ?? 0.0;
+    final double shock = coeffs['externalShockShield'] ?? 0.0;
 
-    if (sleep > 0.15) {
-      insights.add("🛌 Prioritize Sleep: Rest hours show a strong positive impact of +${sleep.toStringAsFixed(2)} on your baseline. Getting adequate sleep is your primary emotional buffer.");
-    } else if (sleep < -0.15) {
-      insights.add("☁️ Restless Sleep: Sleep duration carries a negative weight of ${sleep.toStringAsFixed(2)}, meaning oversleeping or erratic sleep might trigger brain fog.");
+    if (pain.abs() > 0.1) {
+      insights.add("Pain Impact: Chronic pain pulls down your mood. On high-pain days, reduce physical demands early.");
     }
 
-    if (sleepLag > 0.15) {
-      insights.add("🔄 Sleep Debt: Yesterday's sleep has a powerful carryover effect (+${sleepLag.toStringAsFixed(2)}). A single bad night affects you for two days; keep rest consistent.");
+    if (seizures.abs() > 0.1) {
+      insights.add("Seizure Recovery: Seizure episodes drag your daily energy reserves. Prioritize immediate sensory rest post-incident.");
     }
 
-    if (pain < -0.1) {
-      insights.add("🩺 Pain Buffer: Chronic pain drags your mood baseline down by ${pain.toStringAsFixed(2)}. On high-pain days, reduce physical demands early.");
-    }
-
-    if (seizures < -0.05) {
-      insights.add("⚡ Seizure Recovery: Seizure episodes carry a negative pull of ${seizures.toStringAsFixed(2)} on your daily energy reserve. Prioritize immediate sensory rest post-seizure.");
-    }
-
-    if (period.abs() > 0.05) {
+    if (period.abs() > 0.1) {
       if (period < 0) {
-        insights.add("🌸 Menstrual Sensitivity: Active period days drop your daily baseline by ${period.toStringAsFixed(2)}. Give yourself extra permission to slow down during menses.");
+        insights.add("Menstrual Sensitivity: Active period days drop your daily baseline. Give yourself extra permission to slow down.");
       } else {
-        insights.add("🌸 Cycle Baseline: Active cycle days exhibit a minor positive link of +${period.toStringAsFixed(2)} to your baseline, showing resilience during your menses.");
+        insights.add("Cycle Baseline: Active cycle days exhibit a minor positive link to your daily baseline.");
       }
     }
 
+    if (shock.abs() > 0.1) {
+      insights.add("Stress Shield: The active stress shield successfully keeps chaotic external events isolated from your core mood.");
+    }
+
+    // Sum habits across lags to represent the actual cumulative effect
+    final Map<String, double> habitSums = {};
     coeffs.forEach((key, val) {
-      if (key.startsWith('habit_') && val.abs() > 0.05) {
-        final hid = key.replaceFirst('habit_', '');
+      if (key.startsWith('habit_')) {
+        String hid = key.replaceFirst('habit_', '');
+        if (hid.endsWith('_lag0') || hid.endsWith('_lag1') || hid.endsWith('_lag2') || hid.endsWith('_lag3')) {
+          hid = hid.substring(0, hid.length - 5);
+        }
+        habitSums[hid] = (habitSums[hid] ?? 0.0) + val;
+      }
+    });
+
+    habitSums.forEach((hid, val) {
+      if (val.abs() > 0.1) {
         final match = widget.availableHabits.cast<HabitDefinition?>().firstWhere(
           (h) => h!.id == hid || h.name == hid,
           orElse: () => null,
@@ -1435,13 +1424,12 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
                                           nameLower.contains('junk');
 
           if (val > 0) {
-            insights.add("${match.iconEmoji} Boosting Routine: Completing '${match.name}' acts as an independent mood booster (+${val.toStringAsFixed(2)}). Try scheduling this routine today!");
+            insights.add("Boosting Routine: Completing '${match.name}' acts as an independent mood booster (+${val.toStringAsFixed(1)} overall).");
           } else {
             if (isNegativeStressor) {
-              insights.add("${match.iconEmoji} Routine Strain: '${match.name}' shows a negative pull (${val.toStringAsFixed(2)}) on your mood. Consider adjusting this habit to reduce emotional friction.");
+              insights.add("Routine Strain: '${match.name}' shows a negative pull (${val.toStringAsFixed(1)} overall) on your mood.");
             } else {
-              // Healthy habit used as coping/support routine
-              insights.add("${match.iconEmoji} Support Routine: You naturally turn to '${match.name}' (${val.toStringAsFixed(2)}) on days when your mood is already low. This is a great active coping mechanism to ground yourself.");
+              insights.add("Support Routine: You naturally turn to '${match.name}' (${val.toStringAsFixed(1)} overall) on lower-mood days to ground yourself.");
             }
           }
         }
@@ -1449,44 +1437,96 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
     });
 
     if (insights.isEmpty) {
-      insights.add("🌱 Keep Logging: Collect more days of routine logs and symptom ratings to unlock personalized coping actions.");
+      insights.add("Keep Logging: Collect more days of routine logs and symptom ratings to unlock personalized coping actions.");
     }
 
     return insights;
   }
 
-  Widget _buildRegressionRow({
+  Widget _buildDivergingImpactRow({
     required String label,
     required double value,
     required bool isDark,
     String? helpText,
   }) {
     final bool isPositive = value > 0;
-    final color = isPositive ? emerald : Colors.redAccent;
-    final valueText = (isPositive ? "+" : "") + value.toStringAsFixed(2);
+    final color = isPositive ? emerald : Colors.redAccent.shade200;
+    
+    // Normalize value for the bar (cap at +/- 3.0 for scaling)
+    final double maxAbs = 3.0;
+    final double normalized = (value.abs() / maxAbs).clamp(0.0, 1.0);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // 1. Label
               Expanded(
+                flex: 4,
                 child: Text(
                   label,
                   style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white70 : Colors.black87,
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                valueText,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color),
+              const SizedBox(width: 12),
+              
+              // 2. Diverging Bar Infographic
+              Container(
+                width: 110,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(3.5),
+                ),
+                child: Stack(
+                  children: [
+                    // Center line divider
+                    Align(
+                      alignment: Alignment.center,
+                      child: Container(
+                        width: 1.2,
+                        height: 7,
+                        color: isDark ? Colors.white30 : Colors.black26,
+                      ),
+                    ),
+                    // Extending Bar
+                    Positioned(
+                      left: isPositive ? 55 : null,
+                      right: !isPositive ? 55 : null,
+                      width: 55 * normalized,
+                      top: 0,
+                      bottom: 0,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(3.5),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              
+              // 3. Numeric Indicator
+              SizedBox(
+                width: 45,
+                child: Text(
+                  (isPositive ? "+" : "") + value.toStringAsFixed(1),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                  textAlign: TextAlign.right,
+                ),
               ),
             ],
           ),
