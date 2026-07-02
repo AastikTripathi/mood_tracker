@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import '../models/thought.dart';
 import '../models/physical_log.dart';
 import '../services/database_service.dart';
-import 'day_timeline_dialog.dart';
+import 'recovery_comparison_dialog.dart';
 
 class PastEchoesDialog extends StatefulWidget {
   final double currentMood;
@@ -313,13 +313,24 @@ class _PastEchoesDialogState extends State<PastEchoesDialog> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
                             onTap: () {
+                              final today = DateTime.now();
+                              final todayHabits = widget.db.getHabitLogs().where(
+                                (l) => l.occurrenceDate.year == today.year &&
+                                       l.occurrenceDate.month == today.month &&
+                                       l.occurrenceDate.day == today.day,
+                              ).map((l) => l.habitId).toList();
+
                               Navigator.pop(context);
-                              DayTimelineDialog.show(
+                              RecoveryComparisonDialog.show(
                                 context,
-                                date: t.timestamp,
-                                allThoughts: widget.db.getThoughts(),
-                                allHabitLogs: widget.db.getHabitLogs(),
-                                availableHabits: widget.db.getHabitDefinitions(),
+                                currentMood: widget.currentMood,
+                                currentPain: widget.currentPain,
+                                currentSleep: widget.currentSleep,
+                                currentPeriod: widget.currentPeriod,
+                                currentSeizures: widget.currentSeizures,
+                                currentHabits: todayHabits,
+                                echoThought: t,
+                                db: widget.db,
                               );
                             },
                             child: Padding(

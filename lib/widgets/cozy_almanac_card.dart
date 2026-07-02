@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/thought.dart';
+import '../models/habit.dart';
+import '../screens/routine_synergy_screen.dart';
 import 'day_timeline_dialog.dart';
 
 class CozyAlmanacCard extends StatefulWidget {
@@ -376,105 +378,34 @@ class _CozyAlmanacCardState extends State<CozyAlmanacCard> {
             }(),
           ],
 
-          // Weekly Habit Consistency Graph
-          _buildHabitConsistencyGraph(context, isCardDark),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHabitConsistencyGraph(BuildContext context, bool isCardDark) {
-    final today = DateTime.now();
-    final List<DateTime> last7Days = List.generate(7, (i) => today.subtract(Duration(days: 6 - i)));
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isCardDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.teal.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                "Weekly Habit Consistency",
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.bold,
-                  color: isCardDark ? Colors.white70 : Colors.black87,
+          // Action button to open Routine & Synergy Insights
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => RoutineSynergyScreen(
+                    historyThoughts: widget.historyThoughts,
+                    availableHabits: List<HabitDefinition>.from(widget.availableHabits),
+                    allHabitLogs: List<HabitLog>.from(widget.allHabitLogs),
+                    physicalLogs: const [],
+                    isTwilight: widget.isTwilight,
+                  ),
                 ),
-              ),
-              const Icon(Icons.show_chart, size: 16, color: Colors.teal),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: last7Days.map((date) {
-              final completedCount = widget.allHabitLogs.where((log) =>
-                log.occurrenceDate.year == date.year &&
-                log.occurrenceDate.month == date.month &&
-                log.occurrenceDate.day == date.day
-              ).map((log) => log.habitId).toSet().length;
-
-              final totalHabits = widget.availableHabits.isEmpty ? 1 : widget.availableHabits.length;
-              final double completionRatio = (completedCount / totalHabits).clamp(0.0, 1.0);
-
-              final double barHeight = 45.0 * completionRatio;
-              final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-              final String label = weekdays[date.weekday - 1];
-
-              final isToday = date.day == today.day && date.month == today.month && date.year == today.year;
-
-              return Column(
-                children: [
-                  Text(
-                    "$completedCount",
-                    style: TextStyle(
-                      fontSize: 8.5,
-                      fontWeight: FontWeight.bold,
-                      color: isToday ? Colors.teal : (isCardDark ? Colors.white38 : Colors.black38),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    width: 14,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: isCardDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.03),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    alignment: Alignment.bottomCenter,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 500),
-                      width: 14,
-                      height: barHeight == 0 ? 3 : barHeight,
-                      decoration: BoxDecoration(
-                        color: isToday
-                            ? Colors.teal
-                            : (completionRatio > 0.5 ? Colors.teal.shade400 : Colors.teal.shade200),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-                      color: isToday ? Colors.teal : (isCardDark ? Colors.white54 : Colors.black54),
-                    ),
-                  ),
-                ],
               );
-            }).toList(),
+            },
+            icon: const Icon(Icons.hub_outlined, size: 14, color: Colors.teal),
+            label: const Text(
+              "Routine & Synergy Insights",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.teal.withOpacity(0.2)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              minimumSize: const Size.fromHeight(40),
+            ),
           ),
         ],
       ),

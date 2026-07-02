@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import '../models/thought.dart';
 import '../models/habit.dart';
 import '../models/physical_log.dart';
@@ -27,13 +28,14 @@ class DetailedAnalyticsScreen extends StatefulWidget {
   State<DetailedAnalyticsScreen> createState() => _DetailedAnalyticsScreenState();
 }
 
-class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
-  String _selectedTimeline = 'Week'; // Timeline filter: 'Week', 'Month', 'Year'
-  DateTime? _selectedTimetableDate;
+class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  int _selectedClusterIndex = 0;
+  String _activeCalendarView = 'Cluster Alignment';
+
   final DatabaseService _db = DatabaseService();
   
   Map<String, dynamic>? _regressionResults;
-  Map<String, dynamic>? _habitMetrics;
   Map<String, dynamic>? _resilienceRoadmap;
   bool _isLoading = true;
 
@@ -77,94 +79,50 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
             },
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.teal,
+          unselectedLabelColor: isDark ? Colors.white38 : Colors.black45,
+          indicatorColor: Colors.teal,
+          tabs: const [
+            Tab(text: "Headspace Analytics"),
+            Tab(text: "Cluster Cycles"),
+          ],
+        ),
       ),
       body: SafeArea(
         child: _isLoading
             ? const Center(child: CircularProgressIndicator(color: Colors.teal))
-            : SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // 1. Resilience Roadmap Card
-                    _buildResilienceRoadmapCard(isDark, cardBg, textThemeColor),
+            : TabBarView(
+                controller: _tabController,
+                children: [
+                  SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // 1. Resilience Roadmap Card
+                        _buildResilienceRoadmapCard(isDark, cardBg, textThemeColor),
 
-                    // 2. Ridge Regression Isolated Drivers Card
-                    _buildRidgeRegressionCard(isDark, cardBg, textThemeColor),
+                        // 2. Ridge Regression Isolated Drivers Card
+                        _buildRidgeRegressionCard(isDark, cardBg, textThemeColor),
 
-                    // 3. Routine Synergy & Decay Card
-                    _buildHabitSynergyAndDecayCard(isDark, cardBg, textThemeColor),
+                        _buildSectionHeader("Symptom & Pattern Tracking", Icons.analytics, isDark),
+                        const SizedBox(height: 12),
+                        _buildSymptomTrackingCard(isDark, cardBg, textThemeColor),
+                        const SizedBox(height: 24),
 
-                    // Timeline Selector Row
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.teal.withOpacity(0.12)),
-                ),
-                child: Row(
-                  children: ['Week', 'Month', 'Year'].map((timeline) {
-                    final isSelected = _selectedTimeline == timeline;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedTimeline = timeline;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.teal : Colors.transparent,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Center(
-                            child: Text(
-                              timeline,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
+                        _buildSectionHeader("Cycle Forecasting & Phase Mapping", Icons.calendar_month, isDark),
+                        const SizedBox(height: 12),
+                        _buildCycleForecastingCard(isDark, cardBg, textThemeColor),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
+                  _buildClusterCyclesTab(isDark, cardBg, textThemeColor),
+                ],
               ),
-
-              _buildSectionHeader("Routine & Habit Consistency", Icons.loop, isDark),
-              const SizedBox(height: 12),
-              ...widget.availableHabits.map((habit) => _buildHabitDetailCard(habit, isDark, cardBg)),
-              const SizedBox(height: 24),
-
-              _buildSectionHeader("Symptom & Pattern Tracking", Icons.analytics, isDark),
-              const SizedBox(height: 12),
-              _buildSymptomTrackingCard(isDark, cardBg, textThemeColor),
-              const SizedBox(height: 24),
-
-              _buildSectionHeader("Menstrual & Pain Progression Timeline", Icons.timeline, isDark),
-              const SizedBox(height: 12),
-              _buildCyclePainProgressionGraph(isDark, cardBg),
-              const SizedBox(height: 24),
-
-              _buildSectionHeader("Cycle Forecasting & Phase Mapping", Icons.calendar_month, isDark),
-              const SizedBox(height: 12),
-              _buildCycleForecastingCard(isDark, cardBg, textThemeColor),
-              const SizedBox(height: 24),
-
-              _buildSectionHeader("Habits & Check-in Timetable", Icons.schedule, isDark),
-              const SizedBox(height: 12),
-              _buildHabitTimetable(isDark, cardBg),
-              const SizedBox(height: 40),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -187,300 +145,7 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
     );
   }
 
-  Widget _buildHabitDetailCard(HabitDefinition habit, bool isDark, Color cardBg) {
-    final logsForHabit = widget.allHabitLogs.where((l) => l.habitId == habit.id || l.habitId == habit.name).toList();
-    final totalCheckins = logsForHabit.length;
 
-    // Calculate average mood on completed vs skipped days
-    double moodWhenCompleted = 0.0;
-    int completedDaysCount = 0;
-    double moodWhenSkipped = 0.0;
-    int skippedDaysCount = 0;
-
-    for (var thought in widget.historyThoughts) {
-      final d = thought.timestamp;
-      final completed = widget.allHabitLogs.any((l) =>
-          (l.habitId == habit.id || l.habitId == habit.name) &&
-          l.occurrenceDate.year == d.year &&
-          l.occurrenceDate.month == d.month &&
-          l.occurrenceDate.day == d.day);
-
-      if (completed) {
-        moodWhenCompleted += thought.moodScore;
-        completedDaysCount++;
-      } else {
-        moodWhenSkipped += thought.moodScore;
-        skippedDaysCount++;
-      }
-    }
-
-    if (completedDaysCount > 0) moodWhenCompleted /= completedDaysCount;
-    if (skippedDaysCount > 0) moodWhenSkipped /= skippedDaysCount;
-    final moodLift = moodWhenCompleted - moodWhenSkipped;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.teal.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(habit.iconEmoji, style: const TextStyle(fontSize: 22)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  habit.name,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // Render the consistency timeline graph
-          _buildHabitTimelineGraph(habit, isDark),
-
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Completed", style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text("$totalCheckins times total", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.black87)),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text("Mood impact", style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text(
-                    moodLift == 0
-                        ? "Neutral"
-                        : (moodLift > 0 ? "+${moodLift.toStringAsFixed(1)} mood score" : "${moodLift.toStringAsFixed(1)} mood score"),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: moodLift > 0 ? emerald : (moodLift < 0 ? Colors.redAccent : Colors.grey),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          if (moodLift > 0.5) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: emerald.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.favorite, size: 12, color: emerald),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      "Completing this routine boosts your mood on average.",
-                      style: TextStyle(fontSize: 10.5, color: emerald, fontStyle: FontStyle.italic),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHabitTimelineGraph(HabitDefinition habit, bool isDark) {
-    final now = DateTime.now();
-
-    if (_selectedTimeline == 'Week') {
-      // Last 7 days columns
-      final List<Widget> bars = [];
-      final List<String> weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
-      for (int i = 6; i >= 0; i--) {
-        final day = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
-        final completed = widget.allHabitLogs.any((l) =>
-            (l.habitId == habit.id || l.habitId == habit.name) &&
-            l.occurrenceDate.year == day.year &&
-            l.occurrenceDate.month == day.month &&
-            l.occurrenceDate.day == day.day);
-
-        final weekdayName = weekdays[day.weekday - 1];
-
-        bars.add(
-          Expanded(
-            child: Column(
-              children: [
-                Container(
-                  height: 30,
-                  width: 14,
-                  decoration: BoxDecoration(
-                    color: completed ? emerald : (isDark ? Colors.white10 : Colors.black.withOpacity(0.05)),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: completed ? const Center(child: Icon(Icons.check, size: 10, color: Colors.white)) : null,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  weekdayName,
-                  style: const TextStyle(fontSize: 9.5, color: Colors.grey, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: bars,
-      );
-    } else if (_selectedTimeline == 'Month') {
-      // Last 4 weeks completion rates
-      final List<Widget> bars = [];
-
-      for (int w = 3; w >= 0; w--) {
-        int completedCount = 0;
-        final startOffset = w * 7;
-
-        for (int i = 0; i < 7; i++) {
-          final day = DateTime(now.year, now.month, now.day).subtract(Duration(days: startOffset + i));
-          if (widget.allHabitLogs.any((l) =>
-              (l.habitId == habit.id || l.habitId == habit.name) &&
-              l.occurrenceDate.year == day.year &&
-              l.occurrenceDate.month == day.month &&
-              l.occurrenceDate.day == day.day)) {
-            completedCount++;
-          }
-        }
-
-        final completionRate = completedCount / 7.0;
-
-        bars.add(
-          Expanded(
-            child: Column(
-              children: [
-                Stack(
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    Container(
-                      height: 50,
-                      width: 24,
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.white10 : Colors.black.withOpacity(0.04),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                    Container(
-                      height: 50 * completionRate,
-                      width: 24,
-                      decoration: BoxDecoration(
-                        color: emerald,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  w == 0 ? "Now" : "W-$w",
-                  style: const TextStyle(fontSize: 9.5, color: Colors.grey, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: bars,
-      );
-    } else {
-      // Year: Last 12 months completion rates
-      final List<Widget> bars = [];
-      final monthsList = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
-
-      for (int m = 11; m >= 0; m--) {
-        final monthDate = DateTime(now.year, now.month - m, 1);
-        int totalDaysInMonth = DateTime(monthDate.year, monthDate.month + 1, 0).day;
-        int completedCount = 0;
-
-        for (int d = 1; d <= totalDaysInMonth; d++) {
-          final day = DateTime(monthDate.year, monthDate.month, d);
-          if (widget.allHabitLogs.any((l) =>
-              (l.habitId == habit.id || l.habitId == habit.name) &&
-              l.occurrenceDate.year == day.year &&
-              l.occurrenceDate.month == day.month &&
-              l.occurrenceDate.day == day.day)) {
-            completedCount++;
-          }
-        }
-
-        final completionRate = completedCount / totalDaysInMonth;
-        final monthInitial = monthsList[monthDate.month - 1];
-
-        bars.add(
-          Expanded(
-            child: Column(
-              children: [
-                Stack(
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    Container(
-                      height: 60,
-                      width: 12,
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.white10 : Colors.black.withOpacity(0.04),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    Container(
-                      height: 60 * completionRate,
-                      width: 12,
-                      decoration: BoxDecoration(
-                        color: emerald,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  monthInitial,
-                  style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: bars,
-      );
-    }
-  }
 
   Widget _buildSymptomTrackingCard(bool isDark, Color cardBg, Color textColor) {
     // Calculate pain statistics
@@ -669,381 +334,9 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
   }
 
 
-  Widget _buildCyclePainProgressionGraph(bool isDark, Color cardBg) {
-    final sortedLogs = List<PhysicalLog>.from(widget.physicalLogs)
-      ..sort((a, b) => a.date.compareTo(b.date));
-    
-    // Take the last 7 entries
-    final last7Logs = sortedLogs.length > 7 ? sortedLogs.sublist(sortedLogs.length - 7) : sortedLogs;
 
-    if (last7Logs.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.teal.withOpacity(0.08)),
-        ),
-        child: const Center(
-          child: Text(
-            "Log your daily mood and symptoms to plot progression graphs here 🌸",
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.teal.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: last7Logs.map((log) {
-              final painVal = log.customPainLevel ?? 0.0;
-              final isPeriod = log.isPeriodDay || log.flowLevel != 'None';
-              final double painHeight = 60.0 * (painVal / 10.0);
-              final dateLabel = "${log.date.day}/${log.date.month}";
 
-              return Column(
-                children: [
-                  if (painVal > 0)
-                    Text(
-                      painVal.toStringAsFixed(0),
-                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.orangeAccent),
-                    )
-                  else
-                    const Text("-", style: TextStyle(fontSize: 9, color: Colors.grey)),
-                  const SizedBox(height: 4),
-                  Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Container(
-                        width: 16,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.white10 : Colors.black.withOpacity(0.03),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      if (painVal > 0)
-                        Container(
-                          width: 16,
-                          height: painHeight == 0 ? 4 : painHeight,
-                          decoration: BoxDecoration(
-                            color: Colors.orangeAccent.withOpacity(0.85),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                        ),
-                      if (isPeriod)
-                        Positioned(
-                          top: 4,
-                          child: Icon(
-                            Icons.water_drop,
-                            size: 10,
-                            color: log.flowLevel == 'Heavy' 
-                                ? Colors.pink
-                                : (log.flowLevel == 'Medium' ? Colors.pinkAccent : Colors.pink.shade200),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    dateLabel,
-                    style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(width: 10, height: 10, decoration: BoxDecoration(color: Colors.orangeAccent.withOpacity(0.85), borderRadius: BorderRadius.circular(2))),
-              const SizedBox(width: 4),
-              const Text("Pain Severity", style: TextStyle(fontSize: 10, color: Colors.grey)),
-              const SizedBox(width: 16),
-              const Icon(Icons.water_drop, size: 10, color: Colors.pinkAccent),
-              const SizedBox(width: 4),
-              const Text("Active Cycle", style: TextStyle(fontSize: 10, color: Colors.grey)),
-            ],
-          )
-        ],
-      ),
-    );
-  }
-
-  String _formatFullDate(DateTime dt) {
-    final weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final weekdayStr = weekdays[dt.weekday % 7];
-    final monthStr = months[dt.month - 1];
-    return "$weekdayStr, $monthStr ${dt.day}, ${dt.year}";
-  }
-
-  Widget _buildHabitTimetable(bool isDark, Color cardBg) {
-    final today = DateTime.now();
-    // We want to show a 7x13 grid representing the last 13 weeks of habit check-ins.
-    // Ensure the last column ends on Saturday of the current week to align rows (Sunday to Saturday).
-    final endOfGrid = today.add(Duration(days: 6 - (today.weekday % 7)));
-    final startDate = endOfGrid.subtract(const Duration(days: 13 * 7 - 1));
-
-    // Group habit logs by normalized date yyyy-MM-dd
-    final Map<String, List<HabitLog>> logsByDate = {};
-    for (var log in widget.allHabitLogs) {
-      final dateKey = "${log.occurrenceDate.year}-${log.occurrenceDate.month.toString().padLeft(2, '0')}-${log.occurrenceDate.day.toString().padLeft(2, '0')}";
-      logsByDate.putIfAbsent(dateKey, () => []).add(log);
-    }
-
-    final activeSelectedDate = _selectedTimetableDate ?? today;
-    final selectedDateKey = "${activeSelectedDate.year}-${activeSelectedDate.month.toString().padLeft(2, '0')}-${activeSelectedDate.day.toString().padLeft(2, '0')}";
-    final selectedDateLogs = logsByDate[selectedDateKey] ?? [];
-
-    // Columns of weeks (13 weeks)
-    final List<List<DateTime>> gridWeeks = [];
-    for (int w = 0; w < 13; w++) {
-      final List<DateTime> weekDays = [];
-      for (int d = 0; d < 7; d++) {
-        final dayOffset = w * 7 + d;
-        weekDays.add(startDate.add(Duration(days: dayOffset)));
-      }
-      gridWeeks.add(weekDays);
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.teal.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // The Contribution Grid Layout
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Day of week labels on the left
-              Column(
-                children: const [
-                  SizedBox(height: 3),
-                  Text("S", style: TextStyle(fontSize: 8.5, color: Colors.grey, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text("M", style: TextStyle(fontSize: 8.5, color: Colors.grey)),
-                  SizedBox(height: 8),
-                  Text("T", style: TextStyle(fontSize: 8.5, color: Colors.grey, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text("W", style: TextStyle(fontSize: 8.5, color: Colors.grey)),
-                  SizedBox(height: 8),
-                  Text("T", style: TextStyle(fontSize: 8.5, color: Colors.grey, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text("F", style: TextStyle(fontSize: 8.5, color: Colors.grey)),
-                  SizedBox(height: 8),
-                  Text("S", style: TextStyle(fontSize: 8.5, color: Colors.grey, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(width: 8),
-              // Weeks Grid
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
-                    children: gridWeeks.map((week) {
-                      return Column(
-                        children: week.map((day) {
-                          final dateKey = "${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}";
-                          final logsForDay = logsByDate[dateKey] ?? [];
-                          final count = logsForDay.length;
-
-                          // Color intensity based on checks
-                          Color cellColor;
-                          if (count == 0) {
-                            cellColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05);
-                          } else if (count == 1) {
-                            cellColor = isDark ? Colors.teal.shade900.withOpacity(0.5) : Colors.teal.shade100;
-                          } else if (count == 2) {
-                            cellColor = isDark ? Colors.teal.shade700 : Colors.teal.shade200;
-                          } else if (count == 3) {
-                            cellColor = isDark ? Colors.teal.shade500 : Colors.teal.shade400;
-                          } else {
-                            cellColor = isDark ? Colors.teal.shade300 : Colors.teal.shade700;
-                          }
-
-                          final isSelected = day.year == activeSelectedDate.year &&
-                              day.month == activeSelectedDate.month &&
-                              day.day == activeSelectedDate.day;
-
-                          return GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedTimetableDate = day;
-                              });
-                            },
-                            child: Container(
-                              width: 14,
-                              height: 14,
-                              margin: const EdgeInsets.all(2.0),
-                              decoration: BoxDecoration(
-                                color: cellColor,
-                                borderRadius: BorderRadius.circular(3),
-                                border: isSelected
-                                    ? Border.all(color: Colors.orangeAccent, width: 2)
-                                    : (isDark ? null : Border.all(color: Colors.black12, width: 0.5)),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Legend Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              const Text("Less", style: TextStyle(fontSize: 10, color: Colors.grey)),
-              const SizedBox(width: 4),
-              _buildLegendBox(isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05), isDark),
-              _buildLegendBox(isDark ? Colors.teal.shade900.withOpacity(0.5) : Colors.teal.shade100, isDark),
-              _buildLegendBox(isDark ? Colors.teal.shade700 : Colors.teal.shade200, isDark),
-              _buildLegendBox(isDark ? Colors.teal.shade500 : Colors.teal.shade400, isDark),
-              _buildLegendBox(isDark ? Colors.teal.shade300 : Colors.teal.shade700, isDark),
-              const SizedBox(width: 4),
-              const Text("More", style: TextStyle(fontSize: 10, color: Colors.grey)),
-            ],
-          ),
-          const Divider(height: 24),
-          // Selected Day Title
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  _formatFullDate(activeSelectedDate),
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.teal.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  "${selectedDateLogs.length} logged",
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Colors.teal),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Selected Day Details list
-          if (selectedDateLogs.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: Text(
-                  "No routines checked on this day 💤",
-                  style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: isDark ? Colors.white38 : Colors.black38),
-                ),
-              ),
-            )
-          else
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: selectedDateLogs.length,
-              itemBuilder: (context, index) {
-                final log = selectedDateLogs[index];
-                final date = log.occurrenceDate;
-                final hour = date.hour;
-                final minute = date.minute.toString().padLeft(2, '0');
-                final period = hour >= 12 ? 'PM' : 'AM';
-                final formattedHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-                final timeStr = "$formattedHour:$minute $period";
-
-                dynamic matchedHabit;
-                for (var h in widget.availableHabits) {
-                  if (h.id == log.habitId || h.name == log.habitId) {
-                    matchedHabit = h;
-                    break;
-                  }
-                }
-                final name = matchedHabit != null ? matchedHabit.name : log.habitId;
-                final emoji = matchedHabit != null ? matchedHabit.iconEmoji : '⚡';
-
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Text(
-                        emoji,
-                        style: const TextStyle(fontSize: 15),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          name,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.teal.withOpacity(0.06),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          timeStr,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.teal,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLegendBox(Color color, bool isDark) {
-    return Container(
-      width: 10,
-      height: 10,
-      margin: const EdgeInsets.symmetric(horizontal: 1.5),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(2),
-        border: isDark ? null : Border.all(color: Colors.black12, width: 0.5),
-      ),
-    );
-  }
 
   Widget _buildResilienceRoadmapCard(bool isDark, Color cardBg, Color textColor) {
     if (_resilienceRoadmap == null) return const SizedBox.shrink();
@@ -1542,110 +835,7 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
     );
   }
 
-  Widget _buildHabitSynergyAndDecayCard(bool isDark, Color cardBg, Color textColor) {
-    if (_habitMetrics == null) return const SizedBox.shrink();
 
-    final metrics = _habitMetrics!;
-    final synergies = metrics['synergies'] as Map<String, double>;
-    final decays = metrics['decays'] as Map<String, double>;
-
-    if (synergies.isEmpty && decays.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 24),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.teal.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.hub_outlined, size: 20, color: Colors.teal),
-              const SizedBox(width: 8),
-              Text(
-                "Synergy & Routine Stagnation",
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Identifies compound routines that boost you when done together, and flags when routines begin to lose baseline impact.",
-            style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.grey, height: 1.4),
-          ),
-          if (synergies.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              "Synergistic Combinations",
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.white38 : Colors.grey),
-            ),
-            const SizedBox(height: 10),
-            ...synergies.entries.map((entry) {
-              final parts = entry.key.split('+');
-              final h1 = widget.availableHabits.cast<HabitDefinition?>().firstWhere((h) => h!.id == parts[0] || h.name == parts[0], orElse: () => null);
-              final h2 = widget.availableHabits.cast<HabitDefinition?>().firstWhere((h) => h!.id == parts[1] || h.name == parts[1], orElse: () => null);
-              if (h1 == null || h2 == null) return const SizedBox.shrink();
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        "${h1.iconEmoji} ${h1.name} + ${h2.iconEmoji} ${h2.name}",
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: isDark ? Colors.white70 : Colors.black87),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: emerald.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                      child: Text("+${entry.value.toStringAsFixed(1)} boost", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: emerald)),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ],
-          if (decays.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 14),
-            Text(
-              "Routine Stagnation Warnings",
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orangeAccent.shade200),
-            ),
-            const SizedBox(height: 8),
-            ...decays.entries.map((entry) {
-              final h = widget.availableHabits.cast<HabitDefinition?>().firstWhere((habit) => habit!.id == entry.key || habit.name == entry.key, orElse: () => null);
-              if (h == null) return const SizedBox.shrink();
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orangeAccent),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        "Your response to ${h.iconEmoji} ${h.name} has cooled down recently. Consider updating this habit to refresh its emotional benefits.",
-                        style: TextStyle(fontSize: 11, color: isDark ? Colors.white70 : Colors.black87, height: 1.4),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ],
-        ],
-      ),
-    );
-  }
 
   // Dynamic stats calculation
   double _avgCycleLength = 28.0;
@@ -1659,8 +849,15 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _selectedCalendarDate = DateTime.now();
     _loadMetrics();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   void _loadMetrics() {
@@ -1668,7 +865,6 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
       if (mounted) {
         setState(() {
           _regressionResults = _db.performRidgeRegression();
-          _habitMetrics = _db.calculateHabitMetrics();
           _resilienceRoadmap = _db.findResilienceRoadmap();
           _calculateCycleStats();
           _isLoading = false;
@@ -2210,4 +1406,772 @@ class _DetailedAnalyticsScreenState extends State<DetailedAnalyticsScreen> {
       ],
     );
   }
+
+  Widget _buildClusterCyclesTab(bool isDark, Color cardBg, Color textColor) {
+    final List<List<Thought>> clusters = _db.clusterHistory(clusterThreshold: 0.55);
+
+    if (clusters.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.psychology_outlined, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
+                "Need at least 2 saved thoughts",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                "Seed the database sandbox or enter notes to visualize clusters.",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Safety check for index bounds
+    if (_selectedClusterIndex >= clusters.length) {
+      _selectedClusterIndex = 0;
+    }
+
+    final points = _computeClusterPoints(clusters);
+    final activeCluster = clusters[_selectedClusterIndex];
+
+    // Calculate cluster statistics
+    double sumMood = 0;
+    for (final t in activeCluster) {
+      sumMood += t.moodScore;
+    }
+    final double avgMood = sumMood / activeCluster.length;
+    final allClusterTags = activeCluster.expand((t) => {...t.categories, ...t.userTags}).toSet().take(5);
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(20)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Emotional Wagon Wheel Graph", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      const Text("Tap cluster dots directly on the graph to inspect different groups.", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Graph custom paint with tap listener
+                Center(
+                  child: Container(
+                    width: 260,
+                    height: 260,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.teal.withOpacity(0.15)),
+                    ),
+                    child: GestureDetector(
+                      onTapDown: (details) {
+                        final center = const Offset(130, 130);
+                        final maxRadius = 130 * 0.85;
+                        final localPos = details.localPosition;
+                        
+                        final double clickX = (localPos.dx - center.dx) / maxRadius;
+                        final double clickY = -(localPos.dy - center.dy) / maxRadius;
+
+                        int closestIdx = -1;
+                        double closestDist = double.maxFinite;
+
+                        for (final pt in points) {
+                          final dx = pt.x - clickX;
+                          final dy = pt.y - clickY;
+                          final dist = math.sqrt(dx * dx + dy * dy);
+                          if (dist < closestDist) {
+                            closestDist = dist;
+                            closestIdx = pt.index;
+                          }
+                        }
+
+                        if (closestIdx != -1 && closestDist < 0.18) {
+                          setState(() {
+                            _selectedClusterIndex = closestIdx;
+                          });
+                        }
+                      },
+                      child: CustomPaint(
+                        size: const Size(260, 260),
+                        painter: WagonWheelPainter(
+                          points: points,
+                          selectedIndex: _selectedClusterIndex,
+                          isDark: isDark,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Cycle Calendar Panel
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(20)),
+            child: _buildCycleCalendarGrid(activeCluster, isDark, cardBg),
+          ),
+          const SizedBox(height: 16),
+
+          // Thoughts in Selected Cluster Panel
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(20)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Cluster ${_selectedClusterIndex + 1} Entries (${activeCluster.length} thoughts)",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(
+                      "Average Mood: ${avgMood.toStringAsFixed(1)}/10  •  ",
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: allClusterTags.map((tag) => Container(
+                            margin: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              tag,
+                              style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.teal),
+                            ),
+                          )).toList(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: activeCluster.length,
+                  itemBuilder: (context, index) {
+                    final thought = activeCluster[index];
+                    final habits = _db.getHabitsForDay(thought.timestamp);
+                    final habitDefs = _db.getHabitDefinitions();
+                    final habitMap = { for (var d in habitDefs) d.id: d.iconEmoji };
+                    final activeEmojis = habits.map((h) => habitMap[h] ?? '🌿').toList();
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.teal.withOpacity(0.08)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                "${thought.timestamp.day}/${thought.timestamp.month}/${thought.timestamp.year}",
+                                style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                "Mood: ${thought.moodScore}/10",
+                                style: const TextStyle(fontSize: 10, color: Colors.teal, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            thought.textContent,
+                            style: TextStyle(fontSize: 11.5, color: textColor),
+                          ),
+                          if (activeEmojis.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 6,
+                              children: activeEmojis.map((emoji) => Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(emoji, style: const TextStyle(fontSize: 12)),
+                              )).toList(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  List<ClusterPoint> _computeClusterPoints(List<List<Thought>> clusters) {
+    final List<ClusterPoint> points = [];
+    final Map<String, double> angles = {
+      'Joy': math.pi / 2,
+      'Energy': math.pi / 6,
+      'Gratitude': math.pi / 3,
+      'Calm': 2 * math.pi / 3,
+      'Focus': 5 * math.pi / 6,
+      'Sadness': 3 * math.pi / 2,
+      'Discomfort': 4 * math.pi / 3,
+      'Stress': 5 * math.pi / 3,
+      'Frustration': 11 * math.pi / 6,
+    };
+
+    for (int idx = 0; idx < clusters.length; idx++) {
+      final cluster = clusters[idx];
+      double sumX = 0.0;
+      double sumY = 0.0;
+      int count = 0;
+
+      for (final t in cluster) {
+        final tags = {...t.categories, ...t.userTags};
+        for (final tag in tags) {
+          if (angles.containsKey(tag)) {
+            final double theta = angles[tag]!;
+            sumX += math.cos(theta);
+            sumY += math.sin(theta);
+            count++;
+          }
+        }
+      }
+
+      double angle = 0.0;
+      if (count > 0) {
+        final double avgX = sumX / count;
+        final double avgY = sumY / count;
+        angle = math.atan2(avgY, avgX);
+      } else {
+        double sumMood = 0.0;
+        for (final t in cluster) {
+          sumMood += t.moodScore;
+        }
+        final double avgMood = sumMood / cluster.length;
+        angle = avgMood >= 5.0 ? math.pi / 2 : 3 * math.pi / 2;
+      }
+
+      double sumMood = 0.0;
+      for (final t in cluster) {
+        sumMood += t.moodScore;
+      }
+      final double avgMood = sumMood / cluster.length;
+      final double radius = 0.15 + (avgMood - 1.0) / 9.0 * 0.70;
+
+      final double posX = radius * math.cos(angle);
+      final double posY = radius * math.sin(angle);
+
+      final centroid = cluster.first;
+      final words = centroid.textContent.split(' ');
+      final label = words.take(4).join(' ') + (words.length > 4 ? '...' : '');
+
+      points.add(ClusterPoint(
+        index: idx,
+        angle: angle,
+        radius: radius,
+        label: label,
+        x: posX,
+        y: posY,
+        avgMood: avgMood,
+      ));
+    }
+
+    return points;
+  }
+
+  Widget _buildCycleCalendarGrid(List<Thought> clusterThoughts, bool isDark, Color cardBg) {
+    final clusterDates = clusterThoughts.map((t) => "${t.timestamp.year}-${t.timestamp.month}-${t.timestamp.day}").toSet();
+
+    final now = DateTime.now();
+    final List<DateTime> dates = [];
+    for (int i = 45; i >= 1; i--) {
+      dates.add(now.subtract(Duration(days: i)));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("Dynamic Cycle Alignment Calendar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal)),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.03),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _activeCalendarView,
+              dropdownColor: cardBg,
+              iconSize: 18,
+              isExpanded: true,
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.black87),
+              items: ['Cluster Alignment', 'Chronic Pain', 'Seizure Incidents'].map((view) {
+                return DropdownMenuItem<String>(
+                  value: view,
+                  child: Text(view),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() {
+                    _activeCalendarView = val;
+                  });
+                }
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _activeCalendarView == 'Cluster Alignment'
+              ? "Highlighted days belong to the active cluster. Look for correlations with period (🩸) phases."
+              : (_activeCalendarView == 'Chronic Pain'
+                  ? "Color gradient maps pain intensity (red). Bold teal outlines indicate active cluster intersection."
+                  : "Highlights days with seizure events (⚡). Bold teal outlines indicate active cluster intersection."),
+          style: const TextStyle(fontSize: 10, color: Colors.grey),
+        ),
+        const SizedBox(height: 12),
+
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            mainAxisSpacing: 6,
+            crossAxisSpacing: 6,
+            childAspectRatio: 1.0,
+          ),
+          itemCount: dates.length,
+          itemBuilder: (context, idx) {
+            final date = dates[idx];
+            final dateKey = "${date.year}-${date.month}-${date.day}";
+            final isInCluster = clusterDates.contains(dateKey);
+
+            final physicalLog = widget.physicalLogs.firstWhere(
+              (p) => p.date.year == date.year && p.date.month == date.month && p.date.day == date.day,
+              orElse: () => PhysicalLog(date: date, sleepHours: 7.5, isPeriodDay: false, skippedMeal: false, lateCaffeine: false),
+            );
+
+            final int loopI = 45 - idx;
+            final int cycleDay = loopI % 28 == 0 ? 28 : loopI % 28;
+
+            final isPeriod = physicalLog.isPeriodDay;
+
+            Color cellColor;
+            Border border;
+            Widget infoWidget;
+
+            if (_activeCalendarView == 'Chronic Pain') {
+              final double pain = physicalLog.customPainLevel ?? 0.0;
+              if (pain > 0.0) {
+                cellColor = Colors.red.withOpacity((pain / 10.0).clamp(0.08, 0.85));
+              } else {
+                cellColor = isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01);
+              }
+              
+              if (isInCluster) {
+                border = Border.all(color: Colors.teal, width: 2.0);
+              } else {
+                border = Border.all(
+                  color: pain > 0.0 ? Colors.redAccent.withOpacity(0.5) : Colors.grey.withOpacity(0.1),
+                  width: pain > 0.0 ? 1.0 : 0.5,
+                );
+              }
+
+              infoWidget = Text(
+                pain > 0.0 ? "P:${pain.toStringAsFixed(1)}" : "No Pain",
+                style: TextStyle(
+                  fontSize: 7.5,
+                  fontWeight: pain > 0.0 ? FontWeight.bold : FontWeight.normal,
+                  color: pain > 0.0 ? (isDark ? Colors.white70 : Colors.red[900]) : Colors.grey,
+                ),
+              );
+            } else if (_activeCalendarView == 'Seizure Incidents') {
+              final int count = physicalLog.customSeizuresCount ?? 0;
+              if (count > 0) {
+                cellColor = Colors.amber.withOpacity(0.4);
+              } else {
+                cellColor = isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01);
+              }
+
+              if (isInCluster) {
+                border = Border.all(color: Colors.teal, width: 2.0);
+              } else {
+                border = Border.all(
+                  color: count > 0 ? Colors.amber : Colors.grey.withOpacity(0.1),
+                  width: count > 0 ? 1.5 : 0.5,
+                );
+              }
+
+              infoWidget = Text(
+                count > 0 ? "⚡ $count" : "None",
+                style: TextStyle(
+                  fontSize: 7.5,
+                  fontWeight: count > 0 ? FontWeight.bold : FontWeight.normal,
+                  color: count > 0 ? (isDark ? Colors.amberAccent : Colors.orange[800]) : Colors.grey,
+                ),
+              );
+            } else {
+              String phase = 'Luteal';
+              if (cycleDay >= 1 && cycleDay <= 5) {
+                phase = 'Menses';
+              } else if (cycleDay >= 6 && cycleDay <= 13) {
+                phase = 'Follicular';
+              } else if (cycleDay == 14) {
+                phase = 'Ovulatory';
+              }
+
+              Color phaseColor;
+              switch (phase) {
+                case 'Menses':
+                  phaseColor = const Color(0xFFE11D48);
+                  break;
+                case 'Follicular':
+                  phaseColor = const Color(0xFFFDA4AF);
+                  break;
+                case 'Ovulatory':
+                  phaseColor = const Color(0xFFF43F5E);
+                  break;
+                default:
+                  phaseColor = const Color(0xFFFECDD3);
+              }
+
+              cellColor = phaseColor.withOpacity(isDark ? 0.35 : 0.2);
+
+              if (isInCluster) {
+                border = Border.all(color: Colors.teal, width: 2.0);
+              } else {
+                border = Border.all(
+                  color: isPeriod ? Colors.redAccent.withOpacity(0.4) : Colors.grey.withOpacity(0.1),
+                  width: isPeriod ? 1.2 : 0.5,
+                );
+              }
+
+              infoWidget = Text(
+                phase,
+                style: TextStyle(
+                  fontSize: 7.0,
+                  fontWeight: FontWeight.bold,
+                  color: phaseColor,
+                ),
+              );
+            }
+
+            return Container(
+              decoration: BoxDecoration(
+                color: cellColor,
+                borderRadius: BorderRadius.circular(10),
+                border: border,
+              ),
+              child: Stack(
+                children: [
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "${date.day}",
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: isInCluster ? Colors.teal : (isDark ? Colors.white70 : Colors.black87),
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        infoWidget,
+                      ],
+                    ),
+                  ),
+                  if (isPeriod)
+                    const Positioned(
+                      top: 2,
+                      right: 3,
+                      child: Text(
+                        "🩸",
+                        style: TextStyle(fontSize: 7),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+
+        _buildCalendarLegend(isDark),
+      ],
+    );
+  }
+
+  Widget _buildCalendarLegend(bool isDark) {
+    final List<Widget> legendItems = [];
+
+    legendItems.add(
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(color: Colors.teal, width: 1.5),
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Text("In Cluster (Teal Border)", style: TextStyle(fontSize: 9, color: Colors.grey)),
+        ],
+      ),
+    );
+    legendItems.add(const SizedBox(width: 12));
+
+    if (_activeCalendarView == 'Chronic Pain') {
+      legendItems.addAll([
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+          ),
+        ),
+        const SizedBox(width: 4),
+        const Text("Mild Pain", style: TextStyle(fontSize: 9, color: Colors.grey)),
+        const SizedBox(width: 12),
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.65),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: Colors.redAccent),
+          ),
+        ),
+        const SizedBox(width: 4),
+        const Text("Severe Pain", style: TextStyle(fontSize: 9, color: Colors.grey)),
+      ]);
+    } else if (_activeCalendarView == 'Seizure Incidents') {
+      legendItems.addAll([
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: Colors.amber.withOpacity(0.4),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: Colors.amber),
+          ),
+        ),
+        const SizedBox(width: 4),
+        const Text("Seizure (⚡ Count)", style: TextStyle(fontSize: 9, color: Colors.grey)),
+      ]);
+    } else {
+      Widget phaseBox(Color color, String text) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: color.withOpacity(isDark ? 0.35 : 0.2),
+                borderRadius: BorderRadius.circular(2),
+                border: Border.all(color: color.withOpacity(0.5)),
+              ),
+            ),
+            const SizedBox(width: 3),
+            Text(text, style: const TextStyle(fontSize: 8.5, color: Colors.grey)),
+          ],
+        );
+      }
+
+      legendItems.addAll([
+        phaseBox(const Color(0xFFE11D48), "Menses"),
+        const SizedBox(width: 4),
+        phaseBox(const Color(0xFFFDA4AF), "Follicular"),
+        const SizedBox(width: 4),
+        phaseBox(const Color(0xFFF43F5E), "Ovulatory"),
+        const SizedBox(width: 4),
+        phaseBox(const Color(0xFFFECDD3), "Luteal"),
+      ]);
+    }
+
+    legendItems.addAll([
+      const SizedBox(width: 12),
+      const Text("🩸", style: TextStyle(fontSize: 10)),
+      const SizedBox(width: 4),
+      const Text("Period Day", style: TextStyle(fontSize: 9, color: Colors.grey)),
+    ]);
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: legendItems,
+    );
+  }
+}
+
+class ClusterPoint {
+  final int index;
+  final double angle;
+  final double radius;
+  final String label;
+  final double x;
+  final double y;
+  final double avgMood;
+
+  ClusterPoint({
+    required this.index,
+    required this.angle,
+    required this.radius,
+    required this.label,
+    required this.x,
+    required this.y,
+    required this.avgMood,
+  });
+}
+
+class WagonWheelPainter extends CustomPainter {
+  final List<ClusterPoint> points;
+  final int selectedIndex;
+  final bool isDark;
+
+  WagonWheelPainter({
+    required this.points,
+    required this.selectedIndex,
+    required this.isDark,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxRadius = size.width / 2 * 0.82;
+
+    final gridPaint = Paint()
+      ..color = isDark ? Colors.white10 : Colors.black.withOpacity(0.06)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    final axisPaint = Paint()
+      ..color = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.04)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    final double steps = 4;
+    for (int i = 1; i <= steps; i++) {
+      final r = maxRadius * (i / steps);
+      canvas.drawCircle(center, r, gridPaint);
+    }
+
+    final Map<String, double> angles = {
+      'Joy': math.pi / 2,
+      'Energy': math.pi / 6,
+      'Gratitude': math.pi / 3,
+      'Calm': 2 * math.pi / 3,
+      'Focus': 5 * math.pi / 6,
+      'Sadness': 3 * math.pi / 2,
+      'Discomfort': 4 * math.pi / 3,
+      'Stress': 5 * math.pi / 3,
+      'Frustration': 11 * math.pi / 6,
+    };
+
+    angles.forEach((name, theta) {
+      final dx = maxRadius * math.cos(theta);
+      final dy = -maxRadius * math.sin(theta);
+      canvas.drawLine(center, center + Offset(dx, dy), axisPaint);
+    });
+
+    for (final pt in points) {
+      final dx = center.dx + pt.x * maxRadius;
+      final dy = center.dy - pt.y * maxRadius;
+      final ptOffset = Offset(dx, dy);
+
+      final isSelected = pt.index == selectedIndex;
+      
+      Color dotColor;
+      if (pt.avgMood >= 6.0) {
+        dotColor = pt.avgMood >= 7.5 ? const Color(0xFFFFB000) : const Color(0xFF8DE845);
+      } else if (pt.avgMood <= 4.0) {
+        dotColor = Colors.indigoAccent;
+      } else {
+        dotColor = Colors.teal;
+      }
+
+      if (isSelected) {
+        canvas.drawCircle(
+          ptOffset,
+          10,
+          Paint()
+            ..color = dotColor.withOpacity(0.3)
+            ..style = PaintingStyle.fill,
+        );
+        canvas.drawCircle(
+          ptOffset,
+          10,
+          Paint()
+            ..color = dotColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5,
+        );
+      }
+
+      canvas.drawCircle(
+        ptOffset,
+        5.5,
+        Paint()
+          ..color = dotColor
+          ..style = PaintingStyle.fill,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

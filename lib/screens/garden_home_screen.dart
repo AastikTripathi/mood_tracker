@@ -1152,59 +1152,67 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       // 2. Correlate mood, pain, and sleep with engineered patterns
                       double pain = 0.0;
                       double sleepHours = 7.5;
-                      int mood = 7;
                       
                       if (i == 40 || i == 20) {
-                        mood = 3;
                         pain = 7.0;
                         sleepHours = 5.5;
                       } else if (i == 30 || i == 10 || i == 5) {
-                        mood = 2;
                         pain = 0.0;
                         sleepHours = 7.0;
-                      } else if (i == 39 || i == 19) {
-                        mood = 8;
-                        pain = 2.0;
-                        sleepHours = 8.0;
                       } else if (isPeriod) {
                         pain = cycleDay == 3 ? 6.5 : 4.0;
                         sleepHours = 6.0;
-                        mood = cycleDay == 3 ? 3 : 5;
                       } else {
                         if (i % 12 == 0) {
                            pain = 5.5;
                            sleepHours = 5.0;
-                           mood = 4;
                         } else {
                            pain = (i % 7 == 0) ? 2.0 : 0.0;
                            sleepHours = (i % 5 == 0) ? 8.5 : 7.5;
-                           mood = (i % 7 == 0) ? 6 : ((i % 10 == 0) ? 9 : 8);
                         }
                       }
 
-                      // Exercise boost: completing exercise on every 3rd day boosts mood slightly
-                      if (i % 3 == 0) {
-                        mood = math.min(mood + 1, 10);
-                      }
-
-                      // Habit Decay: Napping boosts mood in past but drags it recently
-                      bool logNapping = false;
-                      if (i >= 15) {
-                        if (i % 3 == 0) {
-                          logNapping = true;
-                          mood = math.max(mood, 8);
-                        }
-                      } else {
-                        if (i % 3 == 0) {
-                          logNapping = true;
-                          mood = math.min(mood, 4);
-                        }
-                      }
+                      // Define active habits for this day
+                      final bool logEating = (i % 4 != 0);
+                      final bool logNapping = (i % 3 == 0);
+                      final bool logGardening = (i % 5 == 0 || i % 7 == 0 || i == 39 || i == 19);
+                      final bool logStepping = (i % 2 == 0 || i == 39 || i == 19);
+                      final bool logExercise = (i % 3 == 0);
                       
                       // Seizures
                       List<String> seizures = [];
                       if (i == 40 || i == 20 || i == 30 || i == 10 || i == 5) {
                         seizures = ["10:30 AM"];
+                      }
+
+                      // Generate mood dynamically using a linear equation to ensure mathematical correctness
+                      double generatedMood = 6.5; // Baseline headspace
+                      
+                      // 1. Healthy Habits positive boosts
+                      if (logEating) generatedMood += 1.0;
+                      if (logGardening) generatedMood += 1.2;
+                      if (logStepping) generatedMood += 0.8;
+                      if (logExercise) generatedMood += 1.4;
+                      
+                      // 2. Napping decay: napping drags mood recently but boosted it in past
+                      if (logNapping) {
+                        if (i < 15) {
+                          generatedMood -= 0.8;
+                        } else {
+                          generatedMood += 0.4;
+                        }
+                      }
+                      
+                      // 3. Symptoms drags
+                      generatedMood -= (pain * 0.3);
+                      if (seizures.isNotEmpty) generatedMood -= 2.0;
+                      if (isPeriod) generatedMood -= 1.0;
+                      
+                      int mood = generatedMood.round().clamp(1, 10);
+
+                      // Synergy combo: Gardening + Stepping Out completed together
+                      if (logGardening && logStepping) {
+                        mood = (mood + 1).clamp(1, 10);
                       }
                       
                       // Save Physical Log
@@ -1212,7 +1220,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         date: day,
                         sleepHours: sleepHours,
                         isPeriodDay: isPeriod,
-                        skippedMeal: i % 4 == 0,
+                        skippedMeal: !logEating,
                         lateCaffeine: i % 3 == 0,
                         customPainLevel: pain > 0 ? pain : null,
                         customSeizuresCount: seizures.length,
@@ -1279,13 +1287,13 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       }
                       
                       // Eating
-                      if (i % 4 != 0) {
+                      if (logEating) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_eating_$i',
                           habitId: 'eating',
                           occurrenceDate: day.add(const Duration(hours: 12)),
                           createdAt: day,
-                          intensity: (i % 3) + 3, // varied intensity: 3, 4, or 5
+                          intensity: (i % 3) + 3,
                         ));
                       }
                       
@@ -1296,20 +1304,11 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                           habitId: 'napping',
                           occurrenceDate: day.add(const Duration(hours: 15)),
                           createdAt: day,
-                          intensity: (i % 3) + 2, // varied intensity: 2, 3, or 4
+                          intensity: (i % 3) + 2,
                         ));
                       }
                       
-                      // Gardening & Stepping Out (Synergy Combo)
-                      // If both are completed, boost mood to 9/10
-                      bool logGardening = (mood >= 8 && i % 2 == 0) || (i == 39 || i == 19);
-                      bool logStepping = (mood >= 6 && i % 3 != 0) || (i == 39 || i == 19);
-                      
-                      if (logGardening && logStepping) {
-                        // Synergy boost
-                        mood = 9;
-                      }
-
+                      // Gardening
                       if (logGardening) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_gardening_$i',
@@ -1320,6 +1319,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                         ));
                       }
                       
+                      // Stepping Out
                       if (logStepping) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_stepping_$i',
@@ -1331,7 +1331,7 @@ class GardenHomeScreenState extends State<GardenHomeScreen> with TickerProviderS
                       }
                       
                       // Exercise
-                      if (i % 3 == 0) {
+                      if (logExercise) {
                         await _db.saveHabitLog(HabitLog(
                           id: 'mock_hl_exercise_$i',
                           habitId: 'exercise',
